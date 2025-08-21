@@ -56,37 +56,44 @@ app.post("/update-customer-metafields", async (req, res) => {
     }
   `;
 
+  // Construct the metafields array based on the expected types
+  const metafieldsPayload = [
+    {
+      ownerId: `gid://shopify/Customer/${customerId}`,
+      namespace: "custom",
+      key: "name",
+      type: "single_line_text_field",
+      value: customer_name
+    },
+    {
+      ownerId: `gid://shopify/Customer/${customerId}`,
+      namespace: "custom",
+      key: "business_name",
+      type: "single_line_text_field",
+      value: business_name || ""
+    },
+    {
+      ownerId: `gid://shopify/Customer/${customerId}`,
+      namespace: "custom",
+      key: "role",
+      // FIX: Changed type back to a single value field
+      type: "single_line_text_field",
+      // FIX: Value is now a simple string, not a stringified array
+      value: customer_role
+    },
+    {
+      ownerId: `gid://shopify/Customer/${customerId}`,
+      namespace: "custom",
+      key: "phone",
+      // FIX: Changed type to match Shopify definition 'number_integer'
+      type: "number_integer",
+      // For number types, the value must be a string representation of the number.
+      value: customer_phone ? customer_phone.toString() : ""
+    }
+  ];
+
   const variables = {
-    metafields: [
-      {
-        ownerId: `gid://shopify/Customer/${customerId}`,
-        namespace: "custom",
-        key: "name",
-        type: "single_line_text_field",
-        value: customer_name
-      },
-      {
-        ownerId: `gid://shopify/Customer/${customerId}`,
-        namespace: "custom",
-        key: "business_name",
-        type: "single_line_text_field",
-        value: business_name || ""
-      },
-      {
-        ownerId: `gid://shopify/Customer/${customerId}`,
-        namespace: "custom",
-        key: "role",
-        type: "single_line_text_field",
-        value: customer_role
-      },
-      {
-        ownerId: `gid://shopify/Customer/${customerId}`,
-        namespace: "custom",
-        key: "phone",
-        type: "single_line_text_field",
-        value: customer_phone || ""
-      }
-    ]
+    metafields: metafieldsPayload
   };
 
   try {
@@ -148,7 +155,7 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+//   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Shopify Store: ${SHOPIFY_STORE}`);
   console.log(`Admin API Token: ${ADMIN_API_TOKEN ? 'configured' : 'not configured'}`);
 });
