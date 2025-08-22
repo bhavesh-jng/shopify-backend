@@ -4,7 +4,7 @@ const rateLimit = require("express-rate-limit");
 const router = express.Router();
 
 // Get credentials from environment variables
-const { SHOPIFY_STORE, ADMIN_API_TOKEN, GEMINI_API_KEY } = process.env;
+const { SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN, GEMINI_API_KEY } = process.env;
 
 // --- Helper Functions ---
 
@@ -31,7 +31,7 @@ async function fetchProductsForCapsules() {
     url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": ADMIN_API_TOKEN
+      "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
     },
     data: { query }
   });

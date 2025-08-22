@@ -76,7 +76,7 @@ router.post("/", async (req, res) => {
       url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": ADMIN_API_TOKEN
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
       },
       data: { query, variables }
     });
