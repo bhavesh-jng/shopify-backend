@@ -91,7 +91,10 @@ async function fetchProductsForCapsules() {
         return node.variants.edges.map(variantEdge => ({
           id: `${node.id}-${variantEdge.node.id}`,
           handle: node.handle,
-          title: `${node.title} - ${variantEdge.node.title}`,
+         title: variantEdge.node.title === "Default Title"
+  ? node.title
+  : `${node.title} - ${variantEdge.node.title}`,
+
           productTitle: node.title,
           variantTitle: variantEdge.node.title,
           vendor: node.vendor,
