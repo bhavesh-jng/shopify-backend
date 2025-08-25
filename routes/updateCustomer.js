@@ -1,6 +1,8 @@
 const express = require("express");
+
 const axios = require("axios");
 const router = express.Router();
+
 
 // Get Shopify credentials from environment variables
 const { SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN } = process.env;

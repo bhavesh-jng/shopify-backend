@@ -179,19 +179,19 @@ Output JSON format: { "matches": ["Product Title 1","Product Title 2"] }
 
 
 // --- Rate Limiter --- (unchanged)
-const searchLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    console.warn(`Rate limit exceeded for IP: ${req.ip}`);
-    res.status(429).json({
-      error: "Too many requests",
-      details: "You can only make 5 AI search requests per minute. Please wait and try again."
-    });
-  }
-});
+// const searchLimiter = rateLimit({
+//   windowMs: 60 * 1000, // 1 minute
+//   max: 5,
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   handler: (req, res) => {
+//     console.warn(`Rate limit exceeded for IP: ${req.ip}`);
+//     res.status(429).json({
+//       error: "Too many requests",
+//       details: "You can only make 5 AI search requests per minute. Please wait and try again."
+//     });
+//   }
+// });
 
 // --- Enhanced API Route ---
 router.post("/", searchLimiter, async (req, res) => {
