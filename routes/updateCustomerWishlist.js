@@ -1,0 +1,135 @@
+const express = require("express");
+const axios = require("axios");
+const router = express.Router();
+
+// Create a centralized Axios instance for Shopify API calls
+const shopifyApi = axios.create({
+  baseURL: `https://${process.env.SHOPIFY_STORE}/admin/api/2024-07`,
+  headers: {
+    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN,
+    "Content-Type": "application/json",
+  },
+});
+
+/**
+ * Helper function to find the wishlist metafield for a customer.
+ * @param {string} customerId - The Shopify customer ID.
+ * @returns {Promise<object|null>} The existing metafield object or null.
+ */
+const getWishlistMetafield = async (customerId) => {
+  try {
+    const response = await shopifyApi.get(`/customers/${customerId}/metafields.json`);
+    const { metafields } = response.data;
+    return metafields.find((m) => m.namespace === "custom" && m.key === "wishlist") || null;
+  } catch (error) {
+    // Re-throw the error to be caught by the route handler
+    throw error;
+  }
+};
+
+
+// POST /wishlist/add
+router.post("/add", async (req, res) => {
+  const { customerId, productId } = req.body;
+
+  if (!customerId || !productId) {
+    return res.status(400).json({ error: "customerId and productId are required" });
+  }
+
+  // A Shopify product reference metafield requires the GID format.
+  const productGid = `gid://shopify/Product/${productId}`;
+
+  try {
+    const existingMetafield = await getWishlistMetafield(customerId);
+
+    let wishlist = [];
+    if (existingMetafield) {
+      // The value is stored as a JSON string of an array.
+      wishlist = JSON.parse(existingMetafield.value);
+    }
+
+    // Add product GID only if it's not already in the wishlist
+    if (!wishlist.includes(productGid)) {
+      wishlist.push(productGid);
+    } else {
+      // Product already in wishlist, return success without making an API call.
+      return res.json({ success: true, message: "Product already in wishlist", metafield: existingMetafield });
+    }
+
+    const payload = {
+      metafield: {
+        namespace: "custom",
+        key: "wishlist",
+        type: "list.product_reference",
+        // The value for a list type must be a JSON-formatted string.
+        value: JSON.stringify(wishlist),
+      },
+    };
+
+    let updatedMetafield;
+
+    if (existingMetafield) {
+      // Update the existing metafield
+      const response = await shopifyApi.put(`/metafields/${existingMetafield.id}.json`, payload);
+      updatedMetafield = response.data.metafield;
+    } else {
+      // Create a new metafield for the customer
+      const response = await shopifyApi.post(`/customers/${customerId}/metafields.json`, payload);
+      updatedMetafield = response.data.metafield;
+    }
+
+    res.json({ success: true, metafield: updatedMetafield });
+  } catch (err) {
+    console.error("Error adding to wishlist:", err.response ? err.response.data : err.message);
+    res.status(500).json({ error: "Failed to update wishlist" });
+  }
+});
+
+
+// POST /wishlist/remove
+router.post("/remove", async (req, res) => {
+  const { customerId, productId } = req.body;
+
+  if (!customerId || !productId) {
+    return res.status(400).json({ error: "customerId and productId are required" });
+  }
+
+  const productGid = `gid://shopify/Product/${productId}`;
+
+  try {
+    const existingMetafield = await getWishlistMetafield(customerId);
+
+    if (!existingMetafield) {
+      // No wishlist exists, so the item is already "removed".
+      return res.json({ success: true, message: "Wishlist not found, no action needed." });
+    }
+
+    let wishlist = JSON.parse(existingMetafield.value);
+    const initialCount = wishlist.length;
+
+    // Filter out the product GID to remove it
+    wishlist = wishlist.filter((gid) => gid !== productGid);
+    
+    // If the list hasn't changed, the item wasn't there in the first place.
+    if (wishlist.length === initialCount) {
+        return res.json({ success: true, message: "Product not found in wishlist.", metafield: existingMetafield });
+    }
+
+    const payload = {
+      metafield: {
+        id: existingMetafield.id,
+        value: JSON.stringify(wishlist),
+      },
+    };
+
+    const response = await shopifyApi.put(`/metafields/${existingMetafield.id}.json`, payload);
+    const updatedMetafield = response.data.metafield;
+
+    res.json({ success: true, metafield: updatedMetafield });
+  } catch (err) {
+    console.error("Error removing from wishlist:", err.response ? err.response.data : err.message);
+    res.status(500).json({ error: "Failed to remove product from wishlist" });
+  }
+});
+
+module.exports = router;
