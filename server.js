@@ -8,7 +8,7 @@ dotenv.config();
 // --- Import modular routes ---
 const updateCustomerRoutes = require('./routes/updateCustomer');
 const aiSearchRoutes = require('./routes/aiSearch');
-const customerWishlistRoutes = require('./routes/updateCustomerWIshlist');
+const customerWishlistRoutes = require('./routes/updateCustomerWishlist');
 
 // --- Environment Variable Validation ---
 const { SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN, GEMINI_API_KEY, PORT = 3000 } = process.env;
