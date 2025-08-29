@@ -87,6 +87,8 @@ router.post("/add", async (req, res) => {
 
 
 // POST /wishlist/remove
+// 
+
 router.post("/remove", async (req, res) => {
   const { customerId, productId } = req.body;
 
@@ -94,7 +96,7 @@ router.post("/remove", async (req, res) => {
     return res.status(400).json({ error: "customerId and productId are required" });
   }
 
-  const productGid = `gid://shopify/Product/${productId}`;
+  console.log('Remove request - Customer ID:', customerId, 'Product ID:', productId);
 
   try {
     const existingMetafield = await getWishlistMetafield(customerId);
@@ -107,12 +109,36 @@ router.post("/remove", async (req, res) => {
     let wishlist = JSON.parse(existingMetafield.value);
     const initialCount = wishlist.length;
 
-    // Filter out the product GID to remove it
-    wishlist = wishlist.filter((gid) => gid !== productGid);
+    console.log('Current wishlist before removal:', wishlist);
+
+    // Handle both formats: numeric IDs and GIDs
+    // Remove all possible formats of the product ID
+    const productGid = `gid://shopify/Product/${productId}`;
+    const numericId = productId.toString();
+    
+    wishlist = wishlist.filter((item) => {
+      // Convert item to string for comparison
+      const itemStr = item.toString();
+      
+      // Remove if it matches any of these formats:
+      return itemStr !== productGid &&           // GID format
+             itemStr !== numericId &&            // Numeric format
+             itemStr !== `gid://shopify/Product/${itemStr}` && // If item is numeric but we're comparing to GID
+             itemStr.replace('gid://shopify/Product/', '') !== numericId; // Extract numeric from GID
+    });
+    
+    console.log('Wishlist after removal:', wishlist);
     
     // If the list hasn't changed, the item wasn't there in the first place.
     if (wishlist.length === initialCount) {
-        return res.json({ success: true, message: "Product not found in wishlist.", metafield: existingMetafield });
+        console.log('Product not found in wishlist');
+        return res.json({ 
+          success: true, 
+          message: "Product not found in wishlist.", 
+          originalWishlist: JSON.parse(existingMetafield.value),
+          productId: productId,
+          searchedFormats: [productGid, numericId]
+        });
     }
 
     const payload = {
@@ -125,7 +151,13 @@ router.post("/remove", async (req, res) => {
     const response = await shopifyApi.put(`/metafields/${existingMetafield.id}.json`, payload);
     const updatedMetafield = response.data.metafield;
 
-    res.json({ success: true, metafield: updatedMetafield });
+    console.log('Successfully removed product from wishlist');
+    res.json({ 
+      success: true, 
+      metafield: updatedMetafield,
+      removedProductId: productId,
+      newWishlistLength: wishlist.length
+    });
   } catch (err) {
     console.error("Error removing from wishlist:", err.response ? err.response.data : err.message);
     res.status(500).json({ error: "Failed to remove product from wishlist" });
