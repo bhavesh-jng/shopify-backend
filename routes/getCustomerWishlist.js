@@ -83,9 +83,15 @@ router.post("/get", async (req, res) => {
     }
 
     // Step 2: Fetch products + metafields in one GraphQL query
-    const productGIDs = productIds.map(
-      (id) => `gid://shopify/Product/${id}`
-    );
+    // const productGIDs = productIds.map(
+    //   (id) => `gid://shopify/Product/${id}`
+    // );
+
+    const productGIDs = productIds.map(id => {
+  // Extract the numeric part of the ID, if it's a global ID
+  const numericId = id.split('/').pop();
+  return `gid://shopify/Product/${numericId}`;
+});
 
     const productQuery = `
       query getProducts($ids: [ID!]!) {
