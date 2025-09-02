@@ -10,6 +10,10 @@ const updateCustomerRoutes = require('./routes/updateCustomer');
 const aiSearchRoutes = require('./routes/aiSearch');
 const updateCustomerWishlistRoutes = require('./routes/updateCustomerWishlist');
 const getCustomerWishListRoutes = require('./routes/getCustomerWishlist');
+const customerListsRoutes = require('./routes/customerLists');
+
+
+
 
 // --- Environment Variable Validation ---
 const { SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN, GEMINI_API_KEY, PORT = 3000 } = process.env;
@@ -26,6 +30,7 @@ if (!GEMINI_API_KEY) {
 
 // --- App Initialization & Middleware ---
 const app = express();
+
 app.set('trust proxy', 1); // Trust first proxy, adjust if needed
 app.use(express.json()); // Middleware to parse JSON bodies
 app.use(cors());         // Middleware to enable CORS
@@ -40,6 +45,7 @@ app.use("/ai-search", aiSearchRoutes);
 app.use("/wishlist",updateCustomerWishlistRoutes);
 app.use("/customer-wishlist", getCustomerWishListRoutes);
 
+app.use('/customer-lists', customerListsRoutes); 
 
 // --- Core Routes ---
 // Health check endpoint to verify the server is running
