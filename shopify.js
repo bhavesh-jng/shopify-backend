@@ -1,6 +1,7 @@
-const { shopifyApi} = require('@shopify/shopify-api');
+const { shopifyApi, MemorySessionStorage } = require('@shopify/shopify-api');
 require('@shopify/shopify-api/adapters/node');
-require('dotenv/config');
+const dotenv = require("dotenv");
+dotenv.config();
 // 1. Configure the Shopify API
 const shopify = shopifyApi({
   apiKey: process.env.SHOPIFY_API_KEY, 
@@ -10,4 +11,5 @@ const shopify = shopifyApi({
   hostName: 'https://shopify-backend-gt39.onrender.com',
   sessionStorage: new MemorySessionStorage(),
 });
+
 module.exports = { shopify };
