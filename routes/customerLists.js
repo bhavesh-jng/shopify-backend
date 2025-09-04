@@ -106,85 +106,75 @@ router.post('/add', async (req, res) => {
 });
 
 router.post('/create', async (req, res) => {
-  const { customerId, listName, shop, accessToken } = req.body;
+  const { customerId, listName } = req.body;
 
-  // 1. Enhanced input validation
+  // 1. Input validation
   if (!customerId || !listName) {
     return res.status(400).json({
       success: false,
       error: 'Missing required fields: customerId and listName are required'
     });
   }
+  // Ensure shop has correct format
+  const shopDomain = process.env.SHOPIFY_STORE;
+  const accessToken= process.env.SHOPIFY_ADMIN_TOKEN;
 
   try {
-    // 2. Handle session - multiple approaches for different setups
-    let session;
-    
-    // Approach 1: Try to get session from middleware (if properly set up)
-    if (res.locals?.shopify?.session) {
-      session = res.locals.shopify.session;
-    }
-    // Approach 2: Try to get session from request headers (common in API calls)
-    else if (req.headers['x-shopify-shop-domain'] && req.headers['x-shopify-access-token']) {
-      session = {
-        shop: req.headers['x-shopify-shop-domain'],
-        accessToken: req.headers['x-shopify-access-token']
-      };
-    }
-    // Approach 3: Get session data from request body (if passed directly)
-    else if (shop && accessToken) {
-      session = { shop, accessToken };
-    }
-    // Approach 4: Try to find session in session storage
-    else if (req.query.shop) {
-      const sessionId = shopify.session.getOfflineId(req.query.shop);
-      session = await shopify.config.sessionStorage.loadSession(sessionId);
-    }
-    
-    // If no session found, return error
-    if (!session || !session.accessToken) {
-      return res.status(401).json({ 
-        success: false, 
-        error: "Unauthorized: No valid session found. Please ensure you're authenticated with Shopify.",
-        debug: {
-          hasLocalsShopify: !!res.locals?.shopify,
-          hasHeaders: !!(req.headers['x-shopify-shop-domain'] && req.headers['x-shopify-access-token']),
-          hasBodyData: !!(shop && accessToken),
-          hasShopQuery: !!req.query.shop
-        }
-      });
-    }
+    console.log(`Processing request for customer ${customerId} on shop ${shopDomain}`);
 
-    // 3. Create REST and GraphQL clients using the session
-    const restClient = new shopify.clients.Rest({ session });
-    const graphqlClient = new shopify.clients.Graphql({ session });
+    // 2. Set up axios configurations for REST and GraphQL
+    const restConfig = {
+      baseURL: `https://${shopDomain}/admin/api/2025-01`,
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      }
+    };
 
-    // 4. Fetch existing metafield that stores the list of names using REST client
-    const metafieldsResponse = await restClient.get({
-      path: `/customers/${customerId}/metafields.json`,
-      query: { namespace: 'custom', key: 'favList' }
-    });
+    const graphqlConfig = {
+      url: `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      }
+    };
+
+    // 3. Fetch existing metafield that stores the list of names
+    console.log('Fetching existing metafields...');
+    let metafieldsResponse;
+    try {
+      metafieldsResponse = await axios.get(
+        `/customers/${customerId}/metafields.json?namespace=custom&key=favList`,
+        restConfig
+      );
+    } catch (error) {
+      if (error.response?.status === 404) {
+        // Customer not found or no metafields
+        console.log('No existing metafields found or customer not found');
+        metafieldsResponse = { data: { metafields: [] } };
+      } else {
+        throw error;
+      }
+    }
 
     let listNames = [];
     let metafieldId = null;
-    const existingMetafield = metafieldsResponse.body.metafields?.[0];
+    const existingMetafield = metafieldsResponse.data?.metafields?.[0];
 
     if (existingMetafield) {
       metafieldId = existingMetafield.id;
       try {
-        listNames = existingMetafield.value ? JSON.parse(existingMetafield.value) : [];
-        // Ensure listNames is an array
-        if (!Array.isArray(listNames)) {
-          console.warn('Existing list names is not an array, resetting to empty array');
-          listNames = [];
-        }
+        const parsedValue = existingMetafield.value ? JSON.parse(existingMetafield.value) : [];
+        listNames = Array.isArray(parsedValue) ? parsedValue : [];
       } catch (parseError) {
-        console.error('Error parsing existing list names, resetting to empty array:', parseError);
+        console.error('Error parsing existing list names:', parseError);
         listNames = [];
       }
     }
 
-    // 5. Check for duplicates (case-insensitive)
+    console.log('Current lists:', listNames);
+
+    // 4. Check for duplicates (case-insensitive)
     const listExists = listNames.some(name => 
       typeof name === 'string' && name.toLowerCase() === listName.toLowerCase()
     );
@@ -197,38 +187,35 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    // 6. Add the new list name and save the updated array to the customer's metafield
+    // 5. Add the new list name and save the updated array
     listNames.push(listName);
-    const listNamesPayload = {
+    const metafieldPayload = {
       metafield: {
         namespace: 'custom',
         key: 'favList',
         value: JSON.stringify(listNames),
-        type: 'json' // Updated to use 'json' type instead of 'list.single_line_text_field'
+        type: 'json'
       }
     };
 
+    console.log('Updating metafield with new list:', listName);
+
     if (metafieldId) {
       // Update existing metafield
-      await restClient.put({
-        path: `/metafields/${metafieldId}.json`,
-        data: listNamesPayload
-      });
+      await axios.put(`/metafields/${metafieldId}.json`, metafieldPayload, restConfig);
     } else {
       // Create new metafield for the customer
-      await restClient.post({
-        path: `/customers/${customerId}/metafields.json`,
-        data: listNamesPayload
-      });
+      await axios.post(`/customers/${customerId}/metafields.json`, metafieldPayload, restConfig);
     }
 
-    // 7. Sanitize listName to create a valid key for the metafield definition
+    // 6. Create metafield definition using GraphQL
     const safeListKey = listName.toLowerCase()
       .replace(/[^a-z0-9]+/g, '_')
       .replace(/^_|_$/g, '')
-      .substring(0, 30); // Limit key length
+      .substring(0, 30);
 
-    // 8. Create metafield definition using GraphQL client
+    console.log('Creating metafield definition with key:', safeListKey);
+
     const createMutation = `
       mutation MetafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
         metafieldDefinitionCreate(definition: $definition) {
@@ -237,6 +224,9 @@ router.post('/create', async (req, res) => {
             name
             key
             namespace
+            type {
+              name
+            }
           }
           userErrors {
             field
@@ -257,33 +247,56 @@ router.post('/create', async (req, res) => {
       description: `Favorite products list: ${listName}`
     };
 
-    const createResponse = await graphqlClient.query({
-      data: {
-        query: createMutation,
-        variables: { definition: definitionInput }
-      }
-    });
+    const graphqlPayload = {
+      query: createMutation,
+      variables: { definition: definitionInput }
+    };
 
-    // 9. Handle GraphQL response
-    const userErrors = createResponse.body?.data?.metafieldDefinitionCreate?.userErrors;
-    if (userErrors && userErrors.length > 0) {
-      const code = userErrors[0].code;
-      // Handle the "already exists" error gracefully
-      if (code === "DUPLICATE_KEY_NAMESPACE" || code === "TAKEN") {
-        console.log(`Metafield definition already exists for key: ${safeListKey}. Skipping creation.`);
+    let definitionResult = null;
+    try {
+      const graphqlResponse = await axios.post(graphqlConfig.url, graphqlPayload, {
+        headers: graphqlConfig.headers
+      });
+
+      console.log('GraphQL Response:', JSON.stringify(graphqlResponse.data, null, 2));
+
+      // Properly handle GraphQL response structure
+      if (graphqlResponse.data?.data?.metafieldDefinitionCreate) {
+        const createResult = graphqlResponse.data.data.metafieldDefinitionCreate;
+        
+        if (createResult.userErrors && createResult.userErrors.length > 0) {
+          const firstError = createResult.userErrors[0];
+          console.log('GraphQL User Error:', firstError);
+          
+          // Handle duplicate key error gracefully
+          if (firstError.code === "DUPLICATE_KEY_NAMESPACE" || firstError.code === "TAKEN") {
+            console.log(`✅ Metafield definition already exists for key: ${safeListKey}`);
+            definitionResult = { status: 'exists', message: 'Definition already exists' };
+          } else {
+            console.error('GraphQL Error:', firstError);
+            definitionResult = { status: 'error', error: firstError };
+          }
+        } else if (createResult.createdDefinition) {
+          console.log('✅ Successfully created metafield definition:', createResult.createdDefinition);
+          definitionResult = { status: 'created', definition: createResult.createdDefinition };
+        }
       } else {
-        console.error("Failed to create metafield definition:", userErrors);
-        // Don't throw error, just log it as the main functionality (list creation) succeeded
+        console.error('Unexpected GraphQL response structure:', graphqlResponse.data);
+        definitionResult = { status: 'error', error: 'Unexpected response structure' };
       }
-    } else {
-      const createdDefinition = createResponse.body?.data?.metafieldDefinitionCreate?.createdDefinition;
-      if (createdDefinition) {
-        console.log("✅ Created new metafield definition:", createdDefinition);
-      }
+
+    } catch (graphqlError) {
+      console.error('GraphQL request failed:', {
+        message: graphqlError.message,
+        response: graphqlError.response?.data,
+        status: graphqlError.response?.status
+      });
+      // Don't fail the whole request if just the definition creation fails
+      definitionResult = { status: 'error', error: graphqlError.message };
     }
 
-    // 10. Send success response
-    res.status(201).json({
+    // 7. Send success response
+    const response = {
       success: true,
       message: 'List created successfully',
       lists: listNames,
@@ -291,56 +304,104 @@ router.post('/create', async (req, res) => {
         customerId,
         listName,
         metafieldKey: safeListKey,
-        totalLists: listNames.length
+        totalLists: listNames.length,
+        shopDomain: shopDomain,
+        metafieldId: metafieldId,
+        wasUpdate: !!metafieldId
       }
-    });
+    };
+
+    // Add definition result if available
+    if (definitionResult) {
+      response.definitionResult = definitionResult;
+    }
+
+    console.log('✅ Successfully processed request');
+    res.status(201).json(response);
 
   } catch (error) {
     console.error('Error creating customer list:', {
       message: error.message,
-      stack: error.stack,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
       customerId,
       listName,
-      shopifyError: error.response?.body || error.response?.data
+      shop: shopDomain
     });
 
-    // Determine appropriate error status
+    // Determine appropriate status code
     let statusCode = 500;
-    if (error.message?.includes('Unauthorized') || error.response?.status === 401) {
-      statusCode = 401;
-    } else if (error.message?.includes('Not Found') || error.response?.status === 404) {
-      statusCode = 404;
-    } else if (error.response?.status === 429) {
-      statusCode = 429; // Rate limit
+    let errorMessage = 'Failed to create customer list';
+
+    if (error.response) {
+      statusCode = error.response.status;
+      
+      // Handle specific Shopify errors
+      if (statusCode === 401) {
+        errorMessage = 'Unauthorized: Invalid access token or insufficient permissions';
+      } else if (statusCode === 404) {
+        errorMessage = 'Customer not found or shop domain invalid';
+      } else if (statusCode === 429) {
+        errorMessage = 'Rate limit exceeded. Please try again later';
+      } else if (statusCode === 422) {
+        errorMessage = 'Invalid data provided';
+      }
     }
 
     res.status(statusCode).json({
       success: false,
-      error: 'Failed to create customer list',
+      error: errorMessage,
       message: error.message,
-      ...(process.env.NODE_ENV === 'development' && { 
-        debug: {
-          stack: error.stack,
-          shopifyError: error.response?.body
-        }
-      })
+      details: {
+        customerId,
+        listName,
+        shop: shopDomain,
+        statusCode: error.response?.status,
+        shopifyError: error.response?.data
+      }
     });
   }
 });
 
-// Middleware to help with session debugging (optional)
-router.use((req, res, next) => {
-  console.log('Session Debug Info:', {
-    hasLocalsShopify: !!res.locals?.shopify,
-    hasShopifySession: !!res.locals?.shopify?.session,
-    headers: {
-      shopDomain: req.headers['x-shopify-shop-domain'],
-      hasAccessToken: !!req.headers['x-shopify-access-token']
-    },
-    query: req.query,
-    url: req.url
-  });
-  next();
+// Test endpoint to verify setup
+router.post('/test', async (req, res) => {
+  const { shop, accessToken } = req.body;
+  
+  if (!shop || !accessToken) {
+    return res.status(400).json({
+      error: 'Missing shop or accessToken',
+      required: ['shop', 'accessToken']
+    });
+  }
+
+  const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
+
+  try {
+    // Test connection by fetching shop info
+    const response = await axios.get(`https://${shopDomain}/admin/api/2025-01/shop.json`, {
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Connection successful',
+      shop: response.data.shop.name,
+      domain: response.data.shop.domain,
+      apiVersion: '2025-01'
+    });
+
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: 'Connection failed',
+      message: error.message,
+      details: error.response?.data
+    });
+  }
 });
 // Fetch products for a specific list
 router.post('/products', async (req, res) => {
