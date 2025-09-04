@@ -8,6 +8,6 @@ const shopify = shopifyApi({
   scopes: process.env.SHOPIFY_API_SCOPES,
   apiVersion: '2025-07',
   hostName: 'https://shopify-backend-gt39.onrender.com',
-  sessionStorage: new shopify.MemorySessionStorage(), 
+  sessionStorage: new MemorySessionStorage(),
 });
 module.exports = { shopify };
