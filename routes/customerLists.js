@@ -985,4 +985,81 @@ router.post('/check-product', async (req, res) => {
   return orderedProducts;
 }
 
+
+// Rename an existing list
+router.post('/rename', async (req, res) => {
+  const { customerId, oldListName, newListName } = req.body;
+
+  if (!customerId || !oldListName || !newListName) {
+    return res.status(400).json({ success: false, error: 'Missing customerId, oldListName, or newListName' });
+  }
+
+  try {
+    // Fetch existing lists
+    const response = await shopifyApi.get(`/customers/${customerId}/metafields.json?namespace=custom&key=favList`);
+    let listNames = [];
+    let metafieldId = null;
+    if (response.data.metafields && response.data.metafields[0]) {
+      metafieldId = response.data.metafields[0].id;
+      try {
+        listNames = JSON.parse(response.data.metafields[0].value);
+      } catch (parseError) {
+        console.error('Error parsing list names for rename:', parseError);
+        return res.status(500).json({ success: false, error: 'Invalid list format' });
+      }
+    } else {
+      return res.status(404).json({ success: false, error: 'No lists found' });
+    }
+
+    // Check if oldListName exists and newListName doesn't already exist
+    const oldIdx = listNames.findIndex(name => name.toLowerCase() === oldListName.toLowerCase());
+    if (oldIdx === -1) {
+      return res.status(404).json({ success: false, error: 'Old list name not found' });
+    }
+    const duplicate = listNames.some(name => name.toLowerCase() === newListName.toLowerCase());
+    if (duplicate) {
+      return res.status(409).json({ success: false, error: 'A list with the new name already exists' });
+    }
+
+    // Update the list name
+    listNames[oldIdx] = newListName;
+
+    // Save back to Metafield
+    const payload = {
+      metafield: {
+        namespace: 'custom',
+        key: 'favList',
+        value: JSON.stringify(listNames),
+        type: 'list.single_line_text_field'
+      }
+    };
+    await shopifyApi.put(`/metafields/${metafieldId}.json`, payload);
+
+    // Also: Rename the per-list products metafield key (if exists)
+    const oldKey = `favList_${oldListName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const newKey = `favList_${newListName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const perList = await shopifyApi.get(`/customers/${customerId}/metafields.json?namespace=custom&key=${oldKey}`);
+    if (perList.data.metafields && perList.data.metafields[0]) {
+      const products = perList.data.metafields[0].value;
+      // Create new metafield for new name
+      await shopifyApi.post(`/customers/${customerId}/metafields.json`, {
+        metafield: {
+          namespace: 'custom',
+          key: newKey,
+          value: products,
+          type: 'list.product_reference'
+        }
+      });
+      // Delete old metafield
+      await shopifyApi.delete(`/metafields/${perList.data.metafields[0].id}.json`);
+    }
+
+    res.json({ success: true, lists: listNames, message: 'List renamed successfully' });
+  } catch (error) {
+    console.error('Error renaming list:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
 module.exports = router;
