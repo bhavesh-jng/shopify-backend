@@ -1124,6 +1124,42 @@ router.post('/convert-images-to-base64', async (req, res) => {
   }
 });
 
+// Add this image proxy route to your customer-lists router
+router.get('/image-proxy', async (req, res) => {
+  const imageUrl = req.query.url;
+  
+  if (!imageUrl) {
+    return res.status(400).send('Missing URL parameter');
+  }
+  
+  try {
+    console.log('Proxying image:', imageUrl);
+    
+    const response = await axios({
+      url: imageUrl,
+      method: 'GET',
+      responseType: 'stream',
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; ImageProxy/1.0)'
+      }
+    });
+    
+    // Set CORS headers
+    res.set({
+      'Content-Type': response.headers['content-type'] || 'image/jpeg',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=3600'
+    });
+    
+    // Pipe the image directly to response
+    response.data.pipe(res);
+    
+  } catch (error) {
+    console.error('Image proxy error:', error);
+    res.status(404).send('Image not found');
+  }
+});
 
 
 module.exports = router;
