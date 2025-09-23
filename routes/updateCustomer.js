@@ -118,6 +118,7 @@
 
 // // Export the router to be used in server.js
 // module.exports = router;
+const nodemailer = require('nodemailer');
 
 const express = require("express");
 const axios = require("axios");
@@ -128,8 +129,60 @@ const router = express.Router();
 const phoneUtil = PhoneNumberUtil.getInstance();
 
 // Get Shopify credentials from environment variables
-const { SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN } = process.env;
+const { SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN, EMAIL_PASS, EMAIL_USER} = process.env;
+const transporter = nodemailer.createTransporter({
+  service: process.env.EMAIL_SERVICE || 'gmail',
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS
+  }
+});
+async function sendAdminNotification(customerData) {
+  const emailContent = `
+    <h2>New Customer Profile Created - Verification Required</h2>
+    
+    <h3>Customer Details:</h3>
+    <ul>
+      <li><strong>Name:</strong> ${customerData.customer_name}</li>
+      <li><strong>Email:</strong> ${customerData.customer_email || 'Not provided'}</li>
+      <li><strong>Phone:</strong> ${customerData.customer_phone || 'Not provided'}</li>
+      <li><strong>Country:</strong> ${customerData.country}</li>
+      <li><strong>Role:</strong> ${customerData.customer_role}</li>
+    </ul>
+    
+    <h3>Business Information:</h3>
+    <ul>
+      <li><strong>Company:</strong> ${customerData.business_name}</li>
+      <li><strong>Website:</strong> ${customerData.domain_name || 'Not provided'}</li>
+      <li><strong>Employees:</strong> ${customerData.number_of_employees}</li>
+      ${customerData.customer_role === 'Buyer' ? 
+        `<li><strong>Retailer Type:</strong> ${customerData.retailer_type || 'Not specified'}</li>` : 
+        `<li><strong>Supplier Type:</strong> ${customerData.supplier_type || 'Not specified'}</li>
+         <li><strong>Registration #:</strong> ${customerData.business_registration || 'Not provided'}</li>`
+      }
+    </ul>
+    
+    <p><strong>Customer ID:</strong> ${customerData.customerId}</p>
+    <p><strong>Submitted:</strong> ${new Date().toLocaleString()}</p>
+    
+    <p>Please review and verify this customer profile.</p>
+  `;
 
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: process.env.ADMIN_EMAIL,
+    subject: `New ${customerData.customer_role} Profile - ${customerData.business_name}`,
+    html: emailContent
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Admin notification email sent successfully');
+  } catch (error) {
+    console.error('Failed to send admin notification:', error);
+    // Don't fail the main request if email fails
+  }
+}
 // Phone validation function
 function validatePhoneNumber(phoneNumber, countryCode) {
   if (!phoneNumber || !phoneNumber.trim()) {
@@ -379,6 +432,7 @@ router.post("/", async (req, res) => {
       supplier_type: supplier_type || 'not applicable',
       registration: business_registration || 'not provided'
     });
+    await sendAdminNotification(req.body);
 
     res.json({
       success: true,
