@@ -339,7 +339,7 @@ router.post("/", async (req, res) => {
     {
       ownerId: `gid://shopify/Customer/${customerId}`,
       namespace: "custom",
-      key: "domain_name",
+      key: "domain",
       type: "single_line_text_field",
       value: domain_name || ""
     },
@@ -536,6 +536,141 @@ router.get("/customer/:customerId", async (req, res) => {
       error: "Failed to retrieve customer data",
       details: err.message || 'An unexpected error occurred'
     });
+  }
+});
+
+// Updated GET route to fetch all customers with their metafields
+router.get("/customers", async (req, res) => {
+  const { limit = 50, after } = req.query; // Support pagination
+  
+  const query = `
+    query getCustomers($first: Int!, $after: String) {
+      customers(first: $first, after: $after) {
+        pageInfo {
+          hasNextPage
+          hasPreviousPage
+          startCursor
+          endCursor
+        }
+        edges {
+          cursor
+          node {
+            id
+            firstName
+            lastName
+            email
+            phone
+            createdAt
+            updatedAt
+            tags
+            metafields(first: 20, namespace: "custom") {
+              edges {
+                node {
+                  id
+                  namespace
+                  key
+                  value
+                  type
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    first: Math.min(parseInt(limit), 100), // Cap at 100 for performance
+    ...(after && { after })
+  };
+
+  try {
+    const response = await axios({
+      method: "POST",
+      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
+      },
+      data: { query, variables }
+    });
+
+    const result = response.data;
+
+    if (result.errors) {
+      console.error('GraphQL errors:', result.errors);
+      return res.status(400).json({
+        error: 'GraphQL errors occurred',
+        details: result.errors
+      });
+    }
+
+    // Transform the data to make it easier to work with
+    const transformedCustomers = result.data.customers.edges.map(edge => {
+      const customer = edge.node;
+      const metafields = {};
+      
+      // Convert metafields array to object for easier access
+      customer.metafields.edges.forEach(metafieldEdge => {
+        const metafield = metafieldEdge.node;
+        metafields[metafield.key] = metafield.value;
+      });
+
+      return {
+        id: customer.id.replace('gid://shopify/Customer/', ''), // Extract numeric ID
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        email: customer.email,
+        phone: customer.phone,
+        createdAt: customer.createdAt,
+        updatedAt: customer.updatedAt,
+        tags: customer.tags,
+        cursor: edge.cursor,
+        // Custom metafields
+        customerName: metafields.name || '',
+        businessName: metafields.business_name || '',
+        role: metafields.role || '',
+        contact: metafields.contact || '',
+        country: metafields.country || '',
+        domainName: metafields.domain || '',
+        numberOfEmployees: metafields.number_of_employees || '',
+        retailerType: metafields.retailer_type || '',
+        supplierType: metafields.supplier_type || '',
+        businessRegistration: metafields.business_registration || ''
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        customers: transformedCustomers,
+        pageInfo: result.data.customers.pageInfo,
+        totalCount: transformedCustomers.length
+      }
+    });
+
+  } catch (err) {
+    console.error('Unexpected error:', err.message);
+    
+    if (err.response) {
+      console.error('Response error:', err.response.data);
+      return res.status(err.response.status).json({
+        error: "Failed to retrieve customers - Server Error",
+        details: err.response.data || err.message
+      });
+    } else if (err.request) {
+      console.error('Request error:', err.request);
+      return res.status(500).json({
+        error: "Failed to retrieve customers - Network Error",
+        details: 'No response received from Shopify API'
+      });
+    } else {
+      return res.status(500).json({
+        error: "Failed to retrieve customers",
+        details: err.message || 'An unexpected error occurred'
+      });
+    }
   }
 });
 
