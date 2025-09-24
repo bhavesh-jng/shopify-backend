@@ -632,7 +632,7 @@ router.get("/customers", async (req, res) => {
         businessName: metafields.business_name || '',
         role: metafields.role || '',
         contact: metafields.contact || '',
-        isVerified: metafields.isverified || false,
+        isVerified: metafields.isverified || "false",
         country: metafields.country || '',
         domainName: metafields.domain || '',
         numberOfEmployees: metafields.number_of_employees || '',
