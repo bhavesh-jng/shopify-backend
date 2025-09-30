@@ -1,7 +1,10 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-// Load environment variables from .env file
+const admin = require("firebase-admin");
+const path = require("path");
+const dotenv = require("dotenv");
+
 dotenv.config();
 
 // --- Import modular routes ---
@@ -10,8 +13,10 @@ const aiSearchRoutes = require('./routes/aiSearch');
 const updateCustomerWishlistRoutes = require('./routes/updateCustomerWishlist');
 const getCustomerWishListRoutes = require('./routes/getCustomerWishlist');
 const customerListsRoutes = require('./routes/customerLists');
-
 const shareListRoutes = require('./routes/shareList');
+const customers = require('./routes/customers');
+
+
 
 
 // --- Environment Variable Validation ---
@@ -46,6 +51,7 @@ app.use("/customer-wishlist", getCustomerWishListRoutes);
 
 app.use('/customer-lists', customerListsRoutes); 
 app.use("/share-list", shareListRoutes);
+app.use("/customers", customers);
 // --- Core Routes ---
 // Health check endpoint to verify the server is running
 app.get("/health", (req, res) => {
