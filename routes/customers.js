@@ -8,7 +8,8 @@ const router = express.Router();
 const phoneUtil = PhoneNumberUtil.getInstance();
 
 // Get email credentials from environment variables
-const { EMAIL_PASS, EMAIL_USER } = process.env;
+const { EMAIL_PASS, EMAIL_USER,SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN} = process.env;
+
 
 const transporter = nodemailer.createTransport({
   service: process.env.EMAIL_SERVICE || 'gmail',
@@ -102,7 +103,6 @@ const countryToPhoneCode = {
   'Other': 'US' // Default to US format for 'Other'
 };
 
-// POST / - Create or update customer metafields
 router.post("/", async (req, res) => {
   const { 
     customerId, 
@@ -124,6 +124,14 @@ router.post("/", async (req, res) => {
     return res.status(400).json({
       error: 'Missing required fields',
       details: 'customerId, customer_name, customer_role, country, business_name, and number_of_employees are required fields'
+    });
+  }
+
+  // Validate customerId is numeric
+  if (!/^\d+$/.test(customerId.toString())) {
+    return res.status(400).json({
+      error: 'Invalid customerId',
+      details: 'customerId must be a numeric value'
     });
   }
 
@@ -197,7 +205,7 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    // Check if customer exists
+    // Check if customer exists in Firebase
     const customerRef = db.collection('customers').doc(customerId.toString());
     const doc = await customerRef.get();
     
@@ -205,11 +213,146 @@ router.post("/", async (req, res) => {
       // Update existing customer
       delete customerData.createdAt; // Don't update creation date
       await customerRef.update(customerData);
-      console.log(`Successfully updated customer ${customerId}:`, customerData);
+      console.log(`Successfully updated customer ${customerId} in Firebase:`, customerData);
     } else {
       // Create new customer
       await customerRef.set(customerData);
-      console.log(`Successfully created customer ${customerId}:`, customerData);
+      console.log(`Successfully created customer ${customerId} in Firebase:`, customerData);
+    }
+
+    // Update all Shopify metafields
+    const query = `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields { id key value namespace type }
+          userErrors { field message code }
+        }
+      }
+    `;
+
+    // Construct the metafields array based on the expected types
+    const metafieldsPayload = [
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "name",
+        type: "single_line_text_field",
+        value: customer_name
+      },
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "business_name",
+        type: "single_line_text_field",
+        value: business_name
+      },
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "role",
+        type: "single_line_text_field",
+        value: customer_role
+      },
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "contact",
+        type: "single_line_text_field",
+        value: formattedPhone || ""
+      },
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "country",
+        type: "single_line_text_field",
+        value: country
+      },
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "domain",
+        type: "single_line_text_field",
+        value: domain_name || ""
+      },
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "number_of_employees",
+        type: "single_line_text_field",
+        value: number_of_employees
+      }
+    ];
+
+    // Add role-specific fields
+    if (customer_role === 'Buyer' && retailer_type) {
+      metafieldsPayload.push({
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "retailer_type",
+        type: "single_line_text_field",
+        value: retailer_type
+      });
+    }
+
+    if (customer_role === 'Supplier/Vendor') {
+      if (supplier_type) {
+        metafieldsPayload.push({
+          ownerId: `gid://shopify/Customer/${customerId}`,
+          namespace: "custom",
+          key: "supplier_type",
+          type: "single_line_text_field",
+          value: supplier_type
+        });
+      }
+      
+      if (business_registration) {
+        metafieldsPayload.push({
+          ownerId: `gid://shopify/Customer/${customerId}`,
+          namespace: "custom",
+          key: "business_registration",
+          type: "single_line_text_field",
+          value: business_registration
+        });
+      }
+    }
+
+    const variables = {
+      metafields: metafieldsPayload
+    };
+
+    const shopifyResponse = await axios({
+      method: "POST",
+      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
+      },
+      data: { query, variables }
+    });
+
+    const shopifyResult = shopifyResponse.data;
+
+    if (shopifyResult.errors) {
+      console.error('Shopify GraphQL errors:', shopifyResult.errors);
+      console.warn('Firebase updated successfully but Shopify metafields update failed');
+    }
+
+    if (shopifyResult.data?.metafieldsSet?.userErrors?.length > 0) {
+      console.error('Shopify user errors:', shopifyResult.data.metafieldsSet.userErrors);
+      console.warn('Firebase updated successfully but Shopify metafields update had validation errors');
+    } else {
+      console.log(`Successfully updated all Shopify metafields for customer ${customerId}:`, {
+        name: customer_name,
+        role: customer_role,
+        business: business_name,
+        country: country,
+        phone: formattedPhone || 'not provided',
+        employees: number_of_employees,
+        domain: domain_name || 'not provided',
+        retailer_type: retailer_type || 'not applicable',
+        supplier_type: supplier_type || 'not applicable',
+        registration: business_registration || 'not provided'
+      });
     }
 
     // Send admin notification
@@ -218,11 +361,28 @@ router.post("/", async (req, res) => {
     res.json({
       success: true,
       data: customerData,
-      message: doc.exists ? 'Customer profile updated successfully' : 'Customer profile created successfully'
+      message: doc.exists ? 'Customer profile updated successfully' : 'Customer profile created successfully',
+      shopifyMetafieldsUpdated: !shopifyResult.errors && !shopifyResult.data?.metafieldsSet?.userErrors?.length
     });
 
   } catch (err) {
     console.error('Unexpected error:', err.message);
+    
+    // If it's a Shopify-specific error but Firebase succeeded, still return success
+    if (err.response && err.config?.url?.includes('shopify')) {
+      console.error('Shopify API error:', err.response.data);
+      console.warn('Firebase updated successfully but Shopify API call failed');
+      
+      return res.json({
+        success: true,
+        data: customerData,
+        message: 'Customer profile updated in Firebase, but Shopify metafields update failed',
+        shopifyMetafieldsUpdated: false,
+        shopifyError: err.response.data || err.message
+      });
+    }
+
+    // Firebase or other critical error
     return res.status(500).json({
       error: "Failed to update customer data",
       details: err.message || 'An unexpected error occurred'
@@ -383,6 +543,14 @@ router.post("/verify", async (req, res) => {
     });
   }
 
+  // Validate customerId is numeric
+  if (!/^\d+$/.test(customerId.toString())) {
+    return res.status(400).json({
+      error: 'Invalid customerId',
+      details: 'customerId must be a numeric value'
+    });
+  }
+
   if (typeof isVerified !== 'boolean') {
     return res.status(400).json({
       error: 'Invalid isVerified value',
@@ -402,14 +570,62 @@ router.post("/verify", async (req, res) => {
       });
     }
 
-    // Update verification status
+    // Update verification status in Firebase
     await customerRef.update({
       isVerified: isVerified,
       updatedAt: new Date().toISOString(),
       verifiedAt: isVerified ? new Date().toISOString() : null
     });
 
-    console.log(`Successfully updated isVerified status for customer ${customerId} to ${isVerified}`);
+    console.log(`Successfully updated isVerified status in Firebase for customer ${customerId} to ${isVerified}`);
+
+    // Update Shopify metafield for isVerified
+    const query = `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields { id key value namespace type }
+          userErrors { field message code }
+        }
+      }
+    `;
+
+    const metafieldsPayload = [
+      {
+        ownerId: `gid://shopify/Customer/${customerId}`,
+        namespace: "custom",
+        key: "is_verified",
+        type: "boolean",
+        value: isVerified.toString()
+      }
+    ];
+
+    const variables = {
+      metafields: metafieldsPayload
+    };
+
+    const shopifyResponse = await axios({
+      method: "POST",
+      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
+      },
+      data: { query, variables }
+    });
+
+    const shopifyResult = shopifyResponse.data;
+
+    if (shopifyResult.errors) {
+      console.error('Shopify GraphQL errors:', shopifyResult.errors);
+      console.warn('Firebase updated successfully but Shopify metafield update failed');
+    }
+
+    if (shopifyResult.data?.metafieldsSet?.userErrors?.length > 0) {
+      console.error('Shopify user errors:', shopifyResult.data.metafieldsSet.userErrors);
+      console.warn('Firebase updated successfully but Shopify metafield update had validation errors');
+    } else {
+      console.log(`Successfully updated Shopify is_verified metafield for customer ${customerId}: ${isVerified}`);
+    }
 
     res.json({
       success: true,
@@ -418,18 +634,38 @@ router.post("/verify", async (req, res) => {
         customerId: customerId,
         isVerified: isVerified,
         updatedAt: new Date().toISOString()
-      }
+      },
+      shopifyMetafieldUpdated: !shopifyResult.errors && !shopifyResult.data?.metafieldsSet?.userErrors?.length
     });
 
   } catch (err) {
     console.error('Unexpected error during verification update:', err.message);
+    
+    // If it's a Shopify-specific error but Firebase succeeded, still return success
+    if (err.response && err.config?.url?.includes('shopify')) {
+      console.error('Shopify API error:', err.response.data);
+      console.warn('Firebase updated successfully but Shopify API call failed');
+      
+      return res.json({
+        success: true,
+        message: `Customer verification status updated in Firebase to ${isVerified}, but Shopify metafield update failed`,
+        data: {
+          customerId: customerId,
+          isVerified: isVerified,
+          updatedAt: new Date().toISOString()
+        },
+        shopifyMetafieldUpdated: false,
+        shopifyError: err.response.data || err.message
+      });
+    }
+
+    // Firebase or other critical error
     return res.status(500).json({
       error: "Failed to update verification status",
       details: err.message || 'An unexpected error occurred'
     });
   }
 });
-
 // DELETE /customer/:customerId - Delete a customer (optional endpoint)
 router.delete("/customer/:customerId", async (req, res) => {
   const { customerId } = req.params;
@@ -440,7 +676,7 @@ router.delete("/customer/:customerId", async (req, res) => {
       details: 'customerId is required'
     });
   }
-
+ 
   try {
     const customerRef = db.collection('customers').doc(customerId.toString());
     
