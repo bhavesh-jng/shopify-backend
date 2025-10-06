@@ -432,6 +432,69 @@ router.get("/customer/:customerId", async (req, res) => {
   }
 });
 
+
+/**
+ * This endpoint is the first step for a new user.
+ * It takes a Firebase Auth UID and user details, then:
+ * 1. Creates a new customer in Shopify or finds them if they already exist by email.
+ * 2. Creates a corresponding user profile in Firestore, using the Shopify Customer ID as the document ID.
+ */
+
+
+// The new, all-in-one endpoint
+router.post('/create-and-sync-user', async (req, res) => {
+  const { uid, email, name } = req.body;
+
+  if (!uid || !email) {
+    return res.status(400).json({ success: false, error: 'Firebase UID and email are required' });
+  }
+
+  try {
+    let shopifyCustomerId;
+
+    // STEP 1: Create or find the customer in Shopify
+    try {
+      const shopifyPayload = { customer: { first_name: name, email: email } };
+      const shopifyResponse = await shopifyApi.post('/customers.json', shopifyPayload);
+      shopifyCustomerId = shopifyResponse.data.customer.id;
+      console.log(`Created new Shopify customer with ID: ${shopifyCustomerId}`);
+    } catch (error) {
+      if (error.response && error.response.status === 422) {
+        // User email already exists in Shopify, so we find them instead.
+        console.log('Customer likely exists in Shopify. Fetching...');
+        const existingCust = await shopifyApi.get(`/customers/search.json?query=email:${email}`);
+        shopifyCustomerId = existingCust.data.customers[0]?.id;
+        if (!shopifyCustomerId) throw new Error('Existing Shopify customer could not be found by email.');
+        console.log(`Found existing Shopify customer with ID: ${shopifyCustomerId}`);
+      } else {
+        throw error; // Re-throw other errors
+      }
+    }
+
+    // STEP 2: Store the link and user data in Firestore
+    const userDocRef = db.collection('users').doc(uid); // Use Firebase UID as document ID
+    await userDocRef.set({
+      name: name,
+      email: email,
+      shopifyCustomerId: shopifyCustomerId, // The crucial link!
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`Stored user data in Firestore for UID: ${uid}`);
+
+    // STEP 3: Return the Shopify ID to the client
+    res.json({
+      success: true,
+      message: 'User synced successfully across Shopify and Firebase.',
+      shopifyCustomerId: shopifyCustomerId
+    });
+
+  } catch (error) {
+    console.error('FATAL SYNC ERROR:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to sync user.' });
+  }
+});
+
+
 // GET /customers - Retrieve all customers with pagination
 router.get("/customers", async (req, res) => {
   const { 
