@@ -14,6 +14,7 @@ const shopifyApi = axios.create({
   }
 });
 
+
 // Fetch all customer lists
 router.get('/get', async (req, res) => {
   const { customerId } = req.query;
@@ -984,6 +985,75 @@ router.post('/check-product', async (req, res) => {
 
   return orderedProducts;
 }
+
+// creating custom user 
+
+// In your backend (e.g., customer-lists.js)
+
+const admin = require('firebase-admin');
+
+// Initialize Firebase Admin SDK (do this once when your server starts)
+// You need to get your service account key JSON from the Firebase console
+const serviceAccount = require('./path/to/your/serviceAccountKey.json');
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+const db = admin.firestore();
+
+// The new, all-in-one endpoint
+router.post('/create-and-sync-user', async (req, res) => {
+  const { uid, email, name } = req.body;
+
+  if (!uid || !email) {
+    return res.status(400).json({ success: false, error: 'Firebase UID and email are required' });
+  }
+
+  try {
+    let shopifyCustomerId;
+
+    // STEP 1: Create or find the customer in Shopify
+    try {
+      const shopifyPayload = { customer: { first_name: name, email: email } };
+      const shopifyResponse = await shopifyApi.post('/customers.json', shopifyPayload);
+      shopifyCustomerId = shopifyResponse.data.customer.id;
+      console.log(`Created new Shopify customer with ID: ${shopifyCustomerId}`);
+    } catch (error) {
+      if (error.response && error.response.status === 422) {
+        // User email already exists in Shopify, so we find them instead.
+        console.log('Customer likely exists in Shopify. Fetching...');
+        const existingCust = await shopifyApi.get(`/customers/search.json?query=email:${email}`);
+        shopifyCustomerId = existingCust.data.customers[0]?.id;
+        if (!shopifyCustomerId) throw new Error('Existing Shopify customer could not be found by email.');
+        console.log(`Found existing Shopify customer with ID: ${shopifyCustomerId}`);
+      } else {
+        throw error; // Re-throw other errors
+      }
+    }
+
+    // STEP 2: Store the link and user data in Firestore
+    const userDocRef = db.collection('users').doc(uid); // Use Firebase UID as document ID
+    await userDocRef.set({
+      name: name,
+      email: email,
+      shopifyCustomerId: shopifyCustomerId, // The crucial link!
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`Stored user data in Firestore for UID: ${uid}`);
+
+    // STEP 3: Return the Shopify ID to the Flutter app
+    res.json({
+      success: true,
+      message: 'User synced successfully across Shopify and Firebase.',
+      shopifyCustomerId: shopifyCustomerId
+    });
+
+  } catch (error) {
+    console.error('FATAL SYNC ERROR:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to sync user.' });
+  }
+});
+
 
 
 // Rename an existing list
