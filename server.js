@@ -36,7 +36,8 @@ app.use(express.json()); // Middleware to parse JSON bodies
 
 const allowedOrigins = [
   "https://jn-global.myshopify.com",  // Shopify domain
-  "https://jnitin.com/"               // Custom domain (if you have one)
+  "https://jnitin.com/",
+  "https://jnitin.com/apps/proxy"            // Custom domain (if you have one)
 ];
 
 app.use(cors({ origin: allowedOrigins }));
