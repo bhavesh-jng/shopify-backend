@@ -115,7 +115,7 @@ app.use(cors({ origin: allowedOrigins }));
 
 // --- App Proxy Routes (must be mounted at /apps/proxy) ---
 // These routes are accessed via: yourstore.myshopify.com/apps/proxy/...
-app.use("customers", customers);
+app.use("/proxy/customers", customers);
 
 // --- Regular API Routes (non-proxy) ---
 app.use("/update-customer-metafields", updateCustomerRoutes);
