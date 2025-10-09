@@ -215,7 +215,6 @@ const authenticateShopifyWebhook = (req, res, next) => {
   next();
 };
 
-const crypto = require('crypto');
 
 const authenticateShopifyProxy = (req, res, next) => {
   const { 'x-shopify-hmac-sha256': hmacHeader, 'x-shopify-shop-domain': shopDomain } = req.headers;
