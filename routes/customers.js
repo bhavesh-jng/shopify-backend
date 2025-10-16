@@ -853,7 +853,7 @@ router.get("/customer/:customerId/performance",  async (req, res) => {
       query getCustomerMetafield($customerId: ID!) {
         customer(id: $customerId) {
           id
-          metafield(namespace: "custom", key: "performance-excel") {
+          metafield(namespace: "custom", key: "po_excel") {
             id
             value
             type
