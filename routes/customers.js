@@ -837,18 +837,203 @@ router.delete("/customer/:customerId",authenticate, async (req, res) => {
 
 
  // GET /customer/:customerId/excel-data - Fetch and parse Excel metafield
-router.get("/customer/:customerId/performance",  async (req, res) => {
+// router.get("/customer/:customerId/performance",  async (req, res) => {
+//   const { customerId } = req.params;
+
+//   if (!customerId) {
+//     return res.status(400).json({
+//       error: 'Invalid customerId',
+//       details: 'customerId is required'
+//     });
+//   }
+
+//   try {
+//     // Fetch the Excel file metafield from Shopify
+//     const query = `
+//       query getCustomerMetafield($customerId: ID!) {
+//         customer(id: $customerId) {
+//           id
+//           metafield(namespace: "custom", key: "po_excel") {
+//             id
+//             value
+//             type
+//           }
+//         }
+//       }
+//     `;
+
+//     const variables = {
+//       customerId: `gid://shopify/Customer/${customerId}`
+//     };
+
+//     const shopifyResponse = await axios({
+//       method: "POST",
+//       url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+//       headers: {
+//         "Content-Type": "application/json",
+//         "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
+//       },
+//       data: { query, variables }
+//     });
+
+//     const metafieldData = shopifyResponse.data?.data?.customer?.metafield;
+    
+
+//     if (!metafieldData) {
+//   return res.status(404).json({
+//     error: 'Excel file not found',
+//     details: `No metafield found for customer ${customerId}`
+//   });
+// }
+
+// // metafield is likely a file_reference type
+// if (metafieldData.type === 'file_reference') {
+//   const fileId = metafieldData.value; // this is gid://shopify/GenericFile/...
+
+//   const fileQuery = `
+//     query getFileUrl($fileId: ID!) {
+//       node(id: $fileId) {
+//         ... on GenericFile {
+//           url
+//         }
+//         ... on MediaImage {
+//           image {
+//             url
+//           }
+//         }
+//       }
+//     }
+//   `;
+
+//   const fileResponse = await axios({
+//     method: 'POST',
+//     url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+//     headers: {
+//       'Content-Type': 'application/json',
+//       'X-Shopify-Access-Token': SHOPIFY_ADMIN_TOKEN
+//     },
+//     data: { query: fileQuery, variables: { fileId } }
+//   });
+
+//   const fileUrl =
+//     fileResponse.data?.data?.node?.url ||
+//     fileResponse.data?.data?.node?.image?.url;
+
+//   if (!fileUrl) {
+//     return res.status(404).json({
+//       error: 'File URL not found',
+//       details: 'Could not resolve file reference metafield'
+//     });
+//   }
+
+//   // Continue parsing Excel file
+//   const fileBuffer = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+//   const workbook = XLSX.read(fileBuffer.data, { type: 'buffer' });
+//   ...
+// } else {
+//   // if it’s already a URL
+//   const fileUrl = metafieldData.value;
+//   const fileBuffer = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+//   const workbook = XLSX.read(fileBuffer.data, { type: 'buffer' });
+//   ...
+// }
+
+//     // The metafield value should contain the file URL or base64 data
+//     const fileUrl = metafieldData.value;
+
+//     // Download the file
+//     const fileResponse = await axios({
+//       method: 'GET',
+//       url: fileUrl,
+//       responseType: 'arraybuffer'
+//     });
+
+//     // Parse Excel file using SheetJS
+//     const XLSX = require('xlsx');
+//     const workbook = XLSX.read(fileResponse.data, { type: 'buffer' });
+    
+//     // Get the first sheet
+//     const sheetName = workbook.SheetNames[0];
+//     const worksheet = workbook.Sheets[sheetName];
+    
+//     // Convert to JSON
+//     const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+//       header: 1,
+//       defval: '',
+//       blankrows: false
+//     });
+
+//     if (jsonData.length === 0) {
+//       return res.status(404).json({
+//         error: 'Empty file',
+//         details: 'The Excel file contains no data'
+//       });
+//     }
+
+//     // Extract headers and rows
+//     const headers = jsonData[0];
+//     const rows = jsonData.slice(1);
+
+//     // Convert to array of objects
+//     const parsedData = rows.map(row => {
+//       const obj = {};
+//       headers.forEach((header, index) => {
+//         obj[header] = row[index] !== undefined ? row[index] : '';
+//       });
+//       return obj;
+//     });
+
+//     // Calculate summary statistics
+//     const summary = {
+//       totalRows: parsedData.length,
+//       totalOpenPos: parsedData.reduce((sum, row) => sum + (parseFloat(row['Open Pos']) || 0), 0),
+//       totalOrders: parsedData.reduce((sum, row) => sum + (parseFloat(row['Total orders']) || 0), 0),
+//       totalOTIF: parsedData.reduce((sum, row) => sum + (parseFloat(row['OTIF']) || 0), 0),
+//       totalQualityClaimsLY: parsedData.reduce((sum, row) => sum + (parseFloat(row['Quality Claims LY']) || 0), 0),
+//       totalQualityClaims: parsedData.reduce((sum, row) => sum + (parseFloat(row['Quality Claims']) || 0), 0),
+//       totalSKUs: parsedData.reduce((sum, row) => sum + (parseFloat(row['Total SKUs']) || 0), 0),
+//       totalConvertedSKUs: parsedData.reduce((sum, row) => sum + (parseFloat(row['Converted SKUs']) || 0), 0)
+//     };
+
+//     res.json({
+//       success: true,
+//       data: {
+//         headers: headers,
+//         rows: parsedData,
+//         summary: summary,
+//         rowCount: parsedData.length
+//       }
+//     });
+
+//   } catch (err) {
+//     console.error('Error fetching/parsing Excel file:', err.message);
+    
+//     if (err.response?.status === 404) {
+//       return res.status(404).json({
+//         error: 'File not found',
+//         details: 'The Excel file URL is not accessible'
+//       });
+//     }
+
+//     return res.status(500).json({
+//       error: "Failed to fetch or parse Excel file",
+//       details: err.message || 'An unexpected error occurred'
+//     });
+//   }
+// });
+
+
+router.get("/customer/:customerId/performance", async (req, res) => {
   const { customerId } = req.params;
 
   if (!customerId) {
     return res.status(400).json({
-      error: 'Invalid customerId',
-      details: 'customerId is required'
+      error: "Invalid customerId",
+      details: "customerId is required",
     });
   }
 
   try {
-    // Fetch the Excel file metafield from Shopify
     const query = `
       query getCustomerMetafield($customerId: ID!) {
         customer(id: $customerId) {
@@ -863,7 +1048,7 @@ router.get("/customer/:customerId/performance",  async (req, res) => {
     `;
 
     const variables = {
-      customerId: `gid://shopify/Customer/${customerId}`
+      customerId: `gid://shopify/Customer/${customerId}`,
     };
 
     const shopifyResponse = await axios({
@@ -871,104 +1056,160 @@ router.get("/customer/:customerId/performance",  async (req, res) => {
       url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
       },
-      data: { query, variables }
+      data: { query, variables },
     });
 
     const metafieldData = shopifyResponse.data?.data?.customer?.metafield;
 
-    if (!metafieldData || !metafieldData.value) {
+    if (!metafieldData) {
       return res.status(404).json({
-        error: 'Excel file not found',
-        details: `No Excel file metafield found for customer ${customerId}`
+        error: "Excel file not found",
+        details: `No metafield found for customer ${customerId}`,
       });
     }
 
-    // The metafield value should contain the file URL or base64 data
-    const fileUrl = metafieldData.value;
+    let fileUrl;
+
+    // Case 1: metafield type is file_reference
+    if (metafieldData.type === "file_reference") {
+      const fileId = metafieldData.value;
+
+      const fileQuery = `
+        query getFileUrl($fileId: ID!) {
+          node(id: $fileId) {
+            ... on GenericFile {
+              url
+            }
+            ... on MediaImage {
+              image {
+                url
+              }
+            }
+          }
+        }
+      `;
+
+      const fileResponse = await axios({
+        method: "POST",
+        url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+        },
+        data: { query: fileQuery, variables: { fileId } },
+      });
+
+      fileUrl =
+        fileResponse.data?.data?.node?.url ||
+        fileResponse.data?.data?.node?.image?.url;
+
+      if (!fileUrl) {
+        return res.status(404).json({
+          error: "File URL not found",
+          details: "Could not resolve file reference metafield",
+        });
+      }
+    } else {
+      // Case 2: direct URL stored as value
+      fileUrl = metafieldData.value;
+    }
 
     // Download the file
     const fileResponse = await axios({
-      method: 'GET',
+      method: "GET",
       url: fileUrl,
-      responseType: 'arraybuffer'
+      responseType: "arraybuffer",
     });
 
-    // Parse Excel file using SheetJS
-    const XLSX = require('xlsx');
-    const workbook = XLSX.read(fileResponse.data, { type: 'buffer' });
-    
-    // Get the first sheet
+    const XLSX = require("xlsx");
+    const workbook = XLSX.read(fileResponse.data, { type: "buffer" });
+
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    
-    // Convert to JSON
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
       header: 1,
-      defval: '',
-      blankrows: false
+      defval: "",
+      blankrows: false,
     });
 
     if (jsonData.length === 0) {
       return res.status(404).json({
-        error: 'Empty file',
-        details: 'The Excel file contains no data'
+        error: "Empty file",
+        details: "The Excel file contains no data",
       });
     }
 
-    // Extract headers and rows
     const headers = jsonData[0];
     const rows = jsonData.slice(1);
 
-    // Convert to array of objects
-    const parsedData = rows.map(row => {
+    const parsedData = rows.map((row) => {
       const obj = {};
       headers.forEach((header, index) => {
-        obj[header] = row[index] !== undefined ? row[index] : '';
+        obj[header] = row[index] !== undefined ? row[index] : "";
       });
       return obj;
     });
 
-    // Calculate summary statistics
     const summary = {
       totalRows: parsedData.length,
-      totalOpenPos: parsedData.reduce((sum, row) => sum + (parseFloat(row['Open Pos']) || 0), 0),
-      totalOrders: parsedData.reduce((sum, row) => sum + (parseFloat(row['Total orders']) || 0), 0),
-      totalOTIF: parsedData.reduce((sum, row) => sum + (parseFloat(row['OTIF']) || 0), 0),
-      totalQualityClaimsLY: parsedData.reduce((sum, row) => sum + (parseFloat(row['Quality Claims LY']) || 0), 0),
-      totalQualityClaims: parsedData.reduce((sum, row) => sum + (parseFloat(row['Quality Claims']) || 0), 0),
-      totalSKUs: parsedData.reduce((sum, row) => sum + (parseFloat(row['Total SKUs']) || 0), 0),
-      totalConvertedSKUs: parsedData.reduce((sum, row) => sum + (parseFloat(row['Converted SKUs']) || 0), 0)
+      totalOpenPos: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["Open Pos"]) || 0),
+        0
+      ),
+      totalOrders: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["Total orders"]) || 0),
+        0
+      ),
+      totalOTIF: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["OTIF"]) || 0),
+        0
+      ),
+      totalQualityClaimsLY: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["Quality Claims LY"]) || 0),
+        0
+      ),
+      totalQualityClaims: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["Quality Claims"]) || 0),
+        0
+      ),
+      totalSKUs: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["Total SKUs"]) || 0),
+        0
+      ),
+      totalConvertedSKUs: parsedData.reduce(
+        (sum, row) => sum + (parseFloat(row["Converted SKUs"]) || 0),
+        0
+      ),
     };
 
     res.json({
       success: true,
       data: {
-        headers: headers,
+        headers,
         rows: parsedData,
-        summary: summary,
-        rowCount: parsedData.length
-      }
+        summary,
+        rowCount: parsedData.length,
+      },
     });
-
   } catch (err) {
-    console.error('Error fetching/parsing Excel file:', err.message);
-    
+    console.error("Error fetching/parsing Excel file:", err.message);
+
     if (err.response?.status === 404) {
       return res.status(404).json({
-        error: 'File not found',
-        details: 'The Excel file URL is not accessible'
+        error: "File not found",
+        details: "The Excel file URL is not accessible",
       });
     }
 
     return res.status(500).json({
       error: "Failed to fetch or parse Excel file",
-      details: err.message || 'An unexpected error occurred'
+      details: err.message || "An unexpected error occurred",
     });
   }
 });
-
 
 
 
