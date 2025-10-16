@@ -23,7 +23,8 @@
     "firebase-admin": "^13.5.0",
     "google-libphonenumber": "^3.2.43",
     "nodemailer": "^7.0.6",
-    "puppeteer": "^24.22.0"
+    "puppeteer": "^24.22.0",
+    "xlsx": "^0.18.5"
   },
   "engines": {
     "node": "18.x"
