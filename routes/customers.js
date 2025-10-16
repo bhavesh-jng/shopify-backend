@@ -835,5 +835,142 @@ router.delete("/customer/:customerId",authenticate, async (req, res) => {
   }
 });
 
+
+ // GET /customer/:customerId/excel-data - Fetch and parse Excel metafield
+router.get("/customer/:customerId/performance",  async (req, res) => {
+  const { customerId } = req.params;
+
+  if (!customerId) {
+    return res.status(400).json({
+      error: 'Invalid customerId',
+      details: 'customerId is required'
+    });
+  }
+
+  try {
+    // Fetch the Excel file metafield from Shopify
+    const query = `
+      query getCustomerMetafield($customerId: ID!) {
+        customer(id: $customerId) {
+          id
+          metafield(namespace: "custom", key: "performance-excel") {
+            id
+            value
+            type
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      customerId: `gid://shopify/Customer/${customerId}`
+    };
+
+    const shopifyResponse = await axios({
+      method: "POST",
+      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN
+      },
+      data: { query, variables }
+    });
+
+    const metafieldData = shopifyResponse.data?.data?.customer?.metafield;
+
+    if (!metafieldData || !metafieldData.value) {
+      return res.status(404).json({
+        error: 'Excel file not found',
+        details: `No Excel file metafield found for customer ${customerId}`
+      });
+    }
+
+    // The metafield value should contain the file URL or base64 data
+    const fileUrl = metafieldData.value;
+
+    // Download the file
+    const fileResponse = await axios({
+      method: 'GET',
+      url: fileUrl,
+      responseType: 'arraybuffer'
+    });
+
+    // Parse Excel file using SheetJS
+    const XLSX = require('xlsx');
+    const workbook = XLSX.read(fileResponse.data, { type: 'buffer' });
+    
+    // Get the first sheet
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    
+    // Convert to JSON
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+      header: 1,
+      defval: '',
+      blankrows: false
+    });
+
+    if (jsonData.length === 0) {
+      return res.status(404).json({
+        error: 'Empty file',
+        details: 'The Excel file contains no data'
+      });
+    }
+
+    // Extract headers and rows
+    const headers = jsonData[0];
+    const rows = jsonData.slice(1);
+
+    // Convert to array of objects
+    const parsedData = rows.map(row => {
+      const obj = {};
+      headers.forEach((header, index) => {
+        obj[header] = row[index] !== undefined ? row[index] : '';
+      });
+      return obj;
+    });
+
+    // Calculate summary statistics
+    const summary = {
+      totalRows: parsedData.length,
+      totalOpenPos: parsedData.reduce((sum, row) => sum + (parseFloat(row['Open Pos']) || 0), 0),
+      totalOrders: parsedData.reduce((sum, row) => sum + (parseFloat(row['Total orders']) || 0), 0),
+      totalOTIF: parsedData.reduce((sum, row) => sum + (parseFloat(row['OTIF']) || 0), 0),
+      totalQualityClaimsLY: parsedData.reduce((sum, row) => sum + (parseFloat(row['Quality Claims LY']) || 0), 0),
+      totalQualityClaims: parsedData.reduce((sum, row) => sum + (parseFloat(row['Quality Claims']) || 0), 0),
+      totalSKUs: parsedData.reduce((sum, row) => sum + (parseFloat(row['Total SKUs']) || 0), 0),
+      totalConvertedSKUs: parsedData.reduce((sum, row) => sum + (parseFloat(row['Converted SKUs']) || 0), 0)
+    };
+
+    res.json({
+      success: true,
+      data: {
+        headers: headers,
+        rows: parsedData,
+        summary: summary,
+        rowCount: parsedData.length
+      }
+    });
+
+  } catch (err) {
+    console.error('Error fetching/parsing Excel file:', err.message);
+    
+    if (err.response?.status === 404) {
+      return res.status(404).json({
+        error: 'File not found',
+        details: 'The Excel file URL is not accessible'
+      });
+    }
+
+    return res.status(500).json({
+      error: "Failed to fetch or parse Excel file",
+      details: err.message || 'An unexpected error occurred'
+    });
+  }
+});
+
+
+
+
 // Export the router to be used in server.js
 module.exports = router;
