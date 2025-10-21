@@ -366,7 +366,7 @@ router.post("/", async (req, res) => {
     }
 
     // Send admin notification
-    await sendAdminNotification({ ...req.body, customer_email });
+    //await sendAdminNotification({ ...req.body, customer_email });
 
     res.json({
       success: true,
