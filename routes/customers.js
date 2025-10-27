@@ -1867,9 +1867,18 @@ router.get("/customer/:customerId/volume-shipped-ytd", async (req, res) => {
 
 
 router.get("/customer/:customerId/recent-pos", async (req, res) => {
+  console.log("=== ROUTE HIT ===");
+  console.log("Full URL:", req.originalUrl);
+  console.log("Params:", req.params);
+  console.log("Query:", req.query);
+  console.log("Headers:", req.headers);
+  
   const { customerId } = req.params;
 
+  console.log("Extracted customerId:", customerId);
+
   if (!customerId) {
+    console.log("❌ No customerId provided");
     return res.status(400).json({
       error: "Invalid customerId",
       details: "customerId is required",
@@ -1877,6 +1886,8 @@ router.get("/customer/:customerId/recent-pos", async (req, res) => {
   }
 
   try {
+    console.log("🔍 Starting metafield fetch for customer:", customerId);
+    
     // 1. Fetch the metafield containing the Excel file reference/URL
     const query = `
       query getCustomerMetafield($customerId: ID!) {
@@ -1895,187 +1906,42 @@ router.get("/customer/:customerId/recent-pos", async (req, res) => {
       customerId: `gid://shopify/Customer/${customerId}`,
     };
 
+    console.log("📤 Sending GraphQL query to Shopify:", variables);
+
     const shopifyResponse = await axios({
       method: "POST",
-      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      url: `https://${process.env.SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN,
       },
       data: { query, variables },
     });
 
+    console.log("📥 Shopify Response Status:", shopifyResponse.status);
+    console.log("📥 Shopify Response Data:", JSON.stringify(shopifyResponse.data, null, 2));
+
     const metafieldData = shopifyResponse.data?.data?.customer?.metafield;
 
     if (!metafieldData) {
+      console.log("❌ No metafield found");
       return res.status(404).json({
         error: "Recent POs Excel file not found",
-        details: `No 'recentpos' metafield found for customer ${customerId}`,
+        details: `No 'recentpo' metafield found for customer ${customerId}`,
       });
     }
 
-    let fileUrl;
+    console.log("✅ Metafield found:", metafieldData);
 
-    // 2. Resolve the file URL (handling 'file_reference' or direct URL)
-    if (metafieldData.type === "file_reference") {
-      const fileId = metafieldData.value;
-
-      const fileQuery = `
-        query getFileUrl($fileId: ID!) {
-          node(id: $fileId) {
-            ... on GenericFile {
-              url
-            }
-            ... on MediaImage {
-              image {
-                url
-              }
-            }
-          }
-        }
-      `;
-
-      const fileResponse = await axios({
-        method: "POST",
-        url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
-        },
-        data: { query: fileQuery, variables: { fileId } },
-      });
-
-      fileUrl =
-        fileResponse.data?.data?.node?.url ||
-        fileResponse.data?.data?.node?.image?.url;
-
-      if (!fileUrl) {
-        return res.status(404).json({
-          error: "File URL not found",
-          details: "Could not resolve file reference metafield",
-        });
-      }
-    } else {
-      fileUrl = metafieldData.value;
-    }
-
-    // 3. Download the Excel file
-    const fileResponse = await axios({
-      method: "GET",
-      url: fileUrl,
-      responseType: "arraybuffer", // Important for handling binary file data
-    });
-
-    // 4. Parse the Excel file
-    const XLSX = require("xlsx");
-    const workbook = XLSX.read(fileResponse.data, { type: "buffer" });
-
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-
-    // Convert sheet to JSON array (including headers)
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1, // Get data as an array of arrays
-      defval: "",
-      blankrows: false,
-    });
-
-    if (jsonData.length === 0) {
-      return res.status(404).json({
-        error: "Empty file",
-        details: "The Excel file contains no data",
-      });
-    }
-
-    // Clean and normalize headers
-    const headers = jsonData[0].map(h =>
-      h?.toString().trim().replace(/\u00A0/g, " ")
-    );
-
-    const rows = jsonData.slice(1);
-
-    // Helper to safely parse numbers (copied from your original endpoint)
-    const cleanNumber = (val) => {
-      if (typeof val === "number") return val;
-      if (typeof val === "string") {
-        const cleaned = val.toString().replace(/[^0-9.\-]/g, "");
-        return cleaned ? parseFloat(cleaned) : 0;
-      }
-      return 0;
-    };
-
-    // Map rows to objects using the normalized headers
-    const parsedData = rows.map((row) => {
-      const obj = {};
-      headers.forEach((header, index) => {
-        obj[header] = row[index] !== undefined ? row[index] : "";
-      });
-      return obj;
-    });
+    // ... rest of your code
     
-    // 5. Calculate Summary Statistics
-    const totalPos = parsedData.length;
-    
-    // Calculate total and average delay
-    const totalDelay = parsedData.reduce(
-      (sum, row) => sum + cleanNumber(row["Delay days"]),
-      0
-    );
-    const delayedPosCount = parsedData.filter(row => cleanNumber(row["Delay days"]) > 0).length;
-    const onTimePosCount = parsedData.filter(row => cleanNumber(row["Delay days"]) === 0).length;
-    
-    const avgDelay = delayedPosCount > 0 ? (totalDelay / delayedPosCount) : 0;
-    
-    // Identify confirmed POs
-    const confirmedPosCount = parsedData.filter(row => 
-        row["Confirmed"]?.toString().toLowerCase() === "yes" || 
-        row["Confirmed"]?.toString().toLowerCase() === "y" 
-    ).length;
-    
-    // Group by supplier
-    const suppliers = [...new Set(parsedData.map(row => row["Supplier"]))].filter(s => s);
-    
-    const summary = {
-      totalPurchaseOrders: totalPos,
-      totalConfirmedPOs: confirmedPosCount,
-      totalOnTimePOs: onTimePosCount,
-      totalDelayedPOs: delayedPosCount,
-      
-      // Calculate On-Time Percentage
-      onTimeRate: totalPos > 0 ? `${((onTimePosCount / totalPos) * 100).toFixed(1)}%` : "N/A",
-      
-      // Calculate Average Delay (only for orders that were actually delayed)
-      avgDelayDays: avgDelay.toFixed(1),
-      
-      // Calculate Maximum Delay
-      maxDelayDays: parsedData.reduce(
-        (max, row) => Math.max(max, cleanNumber(row["Delay days"])),
-        0
-      ),
-      
-      // List unique suppliers
-      uniqueSuppliers: suppliers.length,
-      supplierList: suppliers,
-    };
-
-    // 6. Send the parsed data to the frontend
-    res.json({
-      success: true,
-      data: {
-        headers,
-        rows: parsedData,
-        summary, // <--- Added the new summary object
-        rowCount: parsedData.length,
-      },
-    });
   } catch (err) {
-    console.error("Error fetching/parsing Recent POs Excel file:", err.message);
-
-    if (err.response?.status === 404) {
-      return res.status(404).json({
-        error: "File not found",
-        details: "The Excel file URL is not accessible",
-      });
+    console.error("💥 ERROR occurred:", err.message);
+    console.error("Error stack:", err.stack);
+    
+    if (err.response) {
+      console.error("Error response status:", err.response.status);
+      console.error("Error response data:", JSON.stringify(err.response.data, null, 2));
     }
 
     return res.status(500).json({
