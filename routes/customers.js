@@ -2013,6 +2013,22 @@ router.get("/customer/:customerId/recent-pos", async (req, res) => {
 
     console.log("Headers:", headers);
 
+    // Define columns to keep
+    const columnsToKeep = ["Purchase Order", "Supplier", "EWD", "AWD", "Due Date"];
+    
+    // Find indices of required columns
+    const columnIndices = columnsToKeep.map(col => ({
+      name: col,
+      index: headers.indexOf(col)
+    })).filter(col => col.index !== -1); // Only keep columns that exist
+
+    console.log("Column indices found:", columnIndices);
+
+    // Also get indices for summary calculations
+    const delayDaysIdx = headers.indexOf("Delay days");
+    const confirmedIdx = headers.indexOf("Confirmed");
+    const supplierIdx = headers.indexOf("Supplier");
+
     // Helper function
     const cleanNumber = (val) => {
       if (typeof val === "number") return val;
@@ -2023,14 +2039,9 @@ router.get("/customer/:customerId/recent-pos", async (req, res) => {
       return 0;
     };
 
-    // Process rows more efficiently - create objects on the fly
+    // Process rows more efficiently - only keep required columns
     const rows = jsonData.slice(1);
     const parsedData = [];
-    
-    // Find column indices once
-    const delayDaysIdx = headers.indexOf("Delay days");
-    const confirmedIdx = headers.indexOf("Confirmed");
-    const supplierIdx = headers.indexOf("Supplier");
     
     let totalDelay = 0;
     let delayedCount = 0;
@@ -2044,30 +2055,37 @@ router.get("/customer/:customerId/recent-pos", async (req, res) => {
       const row = rows[i];
       const obj = {};
       
-      for (let j = 0; j < headers.length; j++) {
-        obj[headers[j]] = row[j] !== undefined ? row[j] : "";
+      // Only create object with required columns
+      for (let col of columnIndices) {
+        obj[col.name] = row[col.index] !== undefined ? row[col.index] : "";
       }
       
       parsedData.push(obj);
       
-      // Calculate stats in same loop
-      const delayDays = cleanNumber(row[delayDaysIdx]);
-      if (delayDays > 0) {
-        totalDelay += delayDays;
-        delayedCount++;
-        maxDelay = Math.max(maxDelay, delayDays);
-      } else {
-        onTimeCount++;
+      // Calculate stats (still using all columns for accuracy)
+      if (delayDaysIdx !== -1) {
+        const delayDays = cleanNumber(row[delayDaysIdx]);
+        if (delayDays > 0) {
+          totalDelay += delayDays;
+          delayedCount++;
+          maxDelay = Math.max(maxDelay, delayDays);
+        } else {
+          onTimeCount++;
+        }
       }
       
-      const confirmed = String(row[confirmedIdx] || "").toLowerCase();
-      if (confirmed === "yes" || confirmed === "y") {
-        confirmedCount++;
+      if (confirmedIdx !== -1) {
+        const confirmed = String(row[confirmedIdx] || "").toLowerCase();
+        if (confirmed === "yes" || confirmed === "y") {
+          confirmedCount++;
+        }
       }
       
-      const supplier = row[supplierIdx];
-      if (supplier) {
-        supplierSet.add(supplier);
+      if (supplierIdx !== -1) {
+        const supplier = row[supplierIdx];
+        if (supplier) {
+          supplierSet.add(supplier);
+        }
       }
     }
 
@@ -2092,10 +2110,13 @@ router.get("/customer/:customerId/recent-pos", async (req, res) => {
     jsonData.length = 0;
     rows.length = 0;
 
+    // Return only the column names that were found
+    const returnedHeaders = columnIndices.map(col => col.name);
+
     res.json({
       success: true,
       data: {
-        headers,
+        headers: returnedHeaders,
         rows: parsedData,
         summary,
         rowCount: parsedData.length,
