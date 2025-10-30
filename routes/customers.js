@@ -2090,6 +2090,455 @@ router.get("/customer/:customerId/volume-shipped-ytd", async (req, res) => {
   }
 });
 
+router.get("/customer/:customerId/volume-origin", async (req, res) => {
+  try {
+    // Get customer ID from request (adjust based on your auth setup)
+    const { customerId } = req.params; // or req.query.customerId, req.session.customerId, etc.
+
+   if (!customerId) {
+      return res.status(401).json({
+        error: "Unauthorized",
+        details: "Customer ID is required"
+      });
+    }
+
+    // Fetch customer's buyers metafield
+    const customerQuery = `
+      query getCustomerBuyers($customerId: ID!) {
+        customer(id: $customerId) {
+          id
+          metafield(namespace: "custom", key: "buyers") {
+            value
+          }
+        }
+      }
+    `;
+
+    const customerResponse = await axios({
+      method: "POST",
+      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+      },
+      data: { 
+        query: customerQuery, 
+        variables: { customerId: `gid://shopify/Customer/${customerId}` }
+      },
+    });
+
+    const customerBuyersValue = customerResponse.data?.data?.customer?.metafield?.value;
+    
+    // Parse the buyers list
+    let allowedBuyers = [];
+    if (customerBuyersValue) {
+      try {
+        // Try parsing as JSON first (for list metafield type)
+        const parsed = JSON.parse(customerBuyersValue);
+        allowedBuyers = Array.isArray(parsed) 
+          ? parsed.map(b => b.trim().toUpperCase()).filter(b => b)
+          : [customerBuyersValue.trim().toUpperCase()];
+      } catch (e) {
+        // If not JSON, treat as comma-separated string
+        allowedBuyers = customerBuyersValue
+          .split(',')
+          .map(b => b.trim().toUpperCase())
+          .filter(b => b);
+      }
+    }
+
+    console.log("Customer ID:", customerId);
+    console.log("Raw customer buyers value:", customerBuyersValue);
+    console.log("Customer allowed buyers (normalized):", allowedBuyers);
+
+    // Fetch shop metafield for Excel file
+    const query = `
+      query getShopMetafield {
+        shop {
+          metafield(namespace: "custom", key: "volumeshippedytd") {
+            id
+            value
+            type
+          }
+        }
+      }
+    `;
+
+    const shopifyResponse = await axios({
+      method: "POST",
+      url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+      },
+      data: { query },
+    });
+
+    console.log("Shopify Response:", JSON.stringify(shopifyResponse.data, null, 2));
+
+    const metafieldData = shopifyResponse.data?.data?.shop?.metafield;
+
+    if (!metafieldData) {
+      return res.status(404).json({
+        error: "Excel file not found",
+        details: "No volumeshippedytd metafield found",
+        debugInfo: shopifyResponse.data
+      });
+    }
+
+    let fileUrl;
+
+    // Case 1: metafield type is file_reference
+    if (metafieldData.type === "file_reference") {
+      const fileId = metafieldData.value;
+
+      const fileQuery = `
+        query getFileUrl($fileId: ID!) {
+          node(id: $fileId) {
+            ... on GenericFile {
+              url
+            }
+            ... on MediaImage {
+              image {
+                url
+              }
+            }
+          }
+        }
+      `;
+
+      const fileResponse = await axios({
+        method: "POST",
+        url: `https://${SHOPIFY_STORE}/admin/api/2025-01/graphql.json`,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+        },
+        data: { query: fileQuery, variables: { fileId } },
+      });
+
+      fileUrl =
+        fileResponse.data?.data?.node?.url ||
+        fileResponse.data?.data?.node?.image?.url;
+
+      if (!fileUrl) {
+        return res.status(404).json({
+          error: "File URL not found",
+          details: "Could not resolve file reference metafield",
+        });
+      }
+    } else {
+      // Case 2: direct URL stored as value
+      fileUrl = metafieldData.value;
+    }
+
+    // Download the file
+    const fileResponse = await axios({
+      method: "GET",
+      url: fileUrl,
+      responseType: "arraybuffer",
+    });
+
+    // Parse Excel file
+    const XLSX = require("xlsx");
+    const workbook = XLSX.read(fileResponse.data, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+
+    // Get the range for debugging
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    console.log("Sheet range:", range);
+
+    // Convert to JSON array format
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+      raw: false,
+    });
+
+    console.log("=== DEBUG INFO ===");
+    console.log("Total rows read:", jsonData.length);
+    console.log("First 3 rows:", JSON.stringify(jsonData.slice(0, 3), null, 2));
+    console.log("==================");
+
+    if (jsonData.length === 0) {
+      return res.status(404).json({
+        error: "Empty file",
+        details: "The Excel file contains no data",
+      });
+    }
+
+    // Find the first non-empty row (header row)
+    let headerRowIndex = 0;
+    for (let i = 0; i < jsonData.length; i++) {
+      if (jsonData[i] && jsonData[i].length > 0 && jsonData[i][0]) {
+        headerRowIndex = i;
+        break;
+      }
+    }
+
+    // Clean and normalize headers
+    const headers = jsonData[headerRowIndex].map((h) =>
+      h?.toString().trim().replace(/\u00A0/g, " ").replace(/\s+/g, " ")
+    );
+
+    console.log("Headers found:", headers);
+
+    // Find column indices for Total and Origin
+    const totalIndex = headers.findIndex(h => 
+      h.toLowerCase() === 'total'
+    );
+    const originIndex = headers.findIndex(h => 
+      h.toLowerCase() === 'origin'
+    );
+
+    console.log("Total column index:", totalIndex);
+    console.log("Origin column index:", originIndex);
+
+    // Get month columns (between Vendor and Total, or all except Buyer/Vendor/Total/Origin)
+    let monthColumns = [];
+    if (totalIndex !== -1) {
+      // Month columns are from index 2 (after Buyer and Vendor) up to Total
+      monthColumns = headers.slice(2, totalIndex);
+    } else {
+      // Fallback: all columns except Buyer, Vendor, and Origin
+      monthColumns = headers.slice(2).filter(h => 
+        h.toLowerCase() !== 'origin' && h.toLowerCase() !== 'total'
+      );
+    }
+
+    console.log("Month columns:", monthColumns);
+
+    // Get data rows (skip header and filter empty rows)
+    const rows = jsonData.slice(headerRowIndex + 1).filter(row => 
+      row && row.length > 0 && (row[0] || row[1])
+    );
+
+    console.log("Number of data rows:", rows.length);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        error: "No data rows found",
+        details: "The Excel file contains headers but no data rows",
+        headers: headers,
+      });
+    }
+
+    // Helper to safely parse numbers
+    const cleanNumber = (val) => {
+      if (val === null || val === undefined || val === "") return 0;
+      if (typeof val === "number") return val;
+      if (typeof val === "string") {
+        const cleaned = val.replace(/[^0-9.\-]/g, "");
+        return cleaned ? parseFloat(cleaned) : 0;
+      }
+      return 0;
+    };
+
+    // Parse data rows
+    const parsedData = rows.map((row) => {
+      const buyerRaw = row[0]?.toString().trim().toUpperCase() || "";
+      const obj = {
+        buyer: buyerRaw,
+        vendor: row[1]?.toString().trim() || "",
+        isTotalRow: buyerRaw.endsWith(" TOTAL"),
+      };
+
+      // Map month columns
+      monthColumns.forEach((month) => {
+        const monthIndex = headers.indexOf(month);
+        obj[month] = cleanNumber(row[monthIndex]);
+      });
+
+      // Add Total column if it exists
+      if (totalIndex !== -1) {
+        obj.total = cleanNumber(row[totalIndex]);
+      }
+
+      // Add Origin column if it exists
+      if (originIndex !== -1) {
+        obj.origin = row[originIndex]?.toString().trim() || "";
+      }
+
+      return obj;
+    });
+
+    // FILTER DATA BY CUSTOMER'S ALLOWED BUYERS
+    const filteredData = allowedBuyers.length > 0
+      ? parsedData.filter(row => {
+          const buyerName = row.buyer.replace(/ TOTAL$/, "").trim();
+          return allowedBuyers.includes(buyerName);
+        })
+      : parsedData; // If no buyers specified, return all data
+
+    console.log("Total parsed rows:", parsedData.length);
+    console.log("Filtered data rows:", filteredData.length);
+
+    if (filteredData.length === 0 && allowedBuyers.length > 0) {
+      return res.json({
+        success: true,
+        data: {
+          headers,
+          rows: [],
+          summary: {
+            totalRows: 0,
+            totalsByMonth: {},
+            totalsByBuyer: {},
+            totalsByVendor: {},
+            totalsByOrigin: {},
+            grandTotal: 0,
+          },
+          rowCount: 0,
+          months: monthColumns,
+          hasTotal: totalIndex !== -1,
+          hasOrigin: originIndex !== -1,
+        },
+        message: "No data available for your assigned buyers",
+        customerBuyers: allowedBuyers
+      });
+    }
+
+    // Calculate summary statistics BASED ON FILTERED DATA
+    const summary = {
+      totalRows: filteredData.length,
+      totalsByMonth: {},
+      totalsByBuyer: {},
+      totalsByVendor: {},
+      totalsByOrigin: {},
+      grandTotal: 0,
+    };
+
+    // Calculate totals by month
+    monthColumns.forEach((month) => {
+      summary.totalsByMonth[month] = filteredData.reduce(
+        (sum, row) => sum + (row[month] || 0),
+        0
+      );
+    });
+
+    // Calculate totals by buyer
+    filteredData.forEach((row) => {
+      if (row.buyer) {
+        if (!summary.totalsByBuyer[row.buyer]) {
+          summary.totalsByBuyer[row.buyer] = 0;
+        }
+        // Use the Total column if available, otherwise sum months
+        if (totalIndex !== -1 && row.total) {
+          summary.totalsByBuyer[row.buyer] += row.total;
+        } else {
+          monthColumns.forEach((month) => {
+            summary.totalsByBuyer[row.buyer] += row[month] || 0;
+          });
+        }
+      }
+    });
+
+    // Calculate totals by vendor
+    filteredData.forEach((row) => {
+      if (row.vendor) {
+        if (!summary.totalsByVendor[row.vendor]) {
+          summary.totalsByVendor[row.vendor] = 0;
+        }
+        // Use the Total column if available, otherwise sum months
+        if (totalIndex !== -1 && row.total) {
+          summary.totalsByVendor[row.vendor] += row.total;
+        } else {
+          monthColumns.forEach((month) => {
+            summary.totalsByVendor[row.vendor] += row[month] || 0;
+          });
+        }
+      }
+    });
+
+    // Calculate totals by origin (if origin column exists)
+    // Only use rows that are TOTAL rows (buyer totals) for origin aggregation
+    let originData = [];
+    let grandTotalValue = 0;
+    
+    if (originIndex !== -1 && totalIndex !== -1) {
+      // Process only buyer TOTAL rows (not vendor detail rows, not grand total)
+      // This will aggregate totals by origin for the filtered buyers only
+      filteredData.forEach((row) => {
+        if (row.isTotalRow && row.origin && row.total && 
+            !(row.buyer.toUpperCase().includes('GRAND') && row.buyer.toUpperCase().includes('TOTAL'))) {
+          
+          if (!summary.totalsByOrigin[row.origin]) {
+            summary.totalsByOrigin[row.origin] = 0;
+          }
+          summary.totalsByOrigin[row.origin] += row.total;
+        }
+      });
+      
+      // Calculate grand total from filtered buyer TOTAL rows (sum of all origins)
+      grandTotalValue = Object.values(summary.totalsByOrigin).reduce(
+        (sum, val) => sum + val,
+        0
+      );
+      
+      // Calculate percentages and prepare data for pie chart
+      Object.entries(summary.totalsByOrigin).forEach(([origin, value]) => {
+        const percentage = grandTotalValue > 0 ? (value / grandTotalValue) * 100 : 0;
+        originData.push({
+          origin: origin,
+          value: value,
+          percentage: percentage
+        });
+      });
+      
+      // Sort by value descending
+      originData.sort((a, b) => b.value - a.value);
+    }
+
+    // Calculate grand total
+    if (totalIndex !== -1) {
+      // If Total column exists, sum all totals
+      summary.grandTotal = filteredData.reduce(
+        (sum, row) => sum + (row.total || 0),
+        0
+      );
+    } else {
+      // Otherwise sum all months
+      summary.grandTotal = Object.values(summary.totalsByMonth).reduce(
+        (sum, val) => sum + val,
+        0
+      );
+    }
+
+    res.json({
+      success: true,
+      data: {
+        headers,
+        rows: filteredData,
+        summary,
+        rowCount: filteredData.length,
+        months: monthColumns,
+        hasTotal: totalIndex !== -1,
+        hasOrigin: originIndex !== -1,
+        originData: originData, // Array of {origin, value, percentage}
+        grandTotalValue: grandTotalValue, // For reference
+      },
+      customerBuyers: allowedBuyers, // Include for debugging/transparency
+    });
+  } catch (err) { 
+    console.error("Error fetching/parsing Excel file:", err.message);
+    console.error("Full error:", err);
+
+    if (err.response?.status === 404) {
+      return res.status(404).json({
+        error: "File not found",
+        details: "The Excel file URL is not accessible",
+      });
+    }
+
+    return res.status(500).json({
+      error: "Failed to fetch or parse Excel file",
+      details: err.message || "An unexpected error occurred",
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    });
+  }
+});
+
 router.get("/customer/:customerId/buyer-volume-shipped", async (req, res) => {
   try {
     const { customerId } = req.params;
