@@ -3294,9 +3294,8 @@ router.get("/customer/:customerId/supplier-info", async (req, res) => {
       .map((row, index) => ({
         id: index + 1,
         company: row["Supplier Name"] || row["Company"] || row["Supplier"] || "",
-        contactPerson: row["Contact Person"] || row["Contact"] || "",
-        email: row["Email"] || row["Supplier Email"] || "",
-        phone: row["Phone"] || row["Contact Number"] || row["Phone Number"] || "",
+        contactPerson: row["Contact person"] || row["Contact"] || "",
+        email: row["Email ID"] || row["Supplier Email"] || "",
       }))
       .filter(s => s.company); // Filter out empty entries
 
