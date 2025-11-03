@@ -1237,6 +1237,8 @@ router.get("/customer/:customerId/merchant-performance", async (req, res) => {
       // Column H: OTIF
       otifRate: `${cleanNumber(customerData["OTIF"]).toFixed(0)}%`,
       otifRawAverage: cleanNumber(customerData["OTIF"]),
+
+      otifLY: cleanNumber(customerData["OTIF LY"]),
       
       // Column I: Quality Claims LY
       totalQualityClaimsLY: cleanNumber(customerData["Quality Claims LY"]),
