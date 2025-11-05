@@ -130,17 +130,6 @@ app.post("/register-firebase", async (req, res) => {
         user = await admin.auth().getUserByEmail(email);
       } else throw e;
     }
-
-    // const customerName = `${firstName} ${lastName}`.trim();
-
-    // // 2. Save Profile to Firestore (idempotent)
-    // await firestore.collection("users").doc(user.uid).set({
-    //   uid: user.uid,
-    //   customerName,
-    //   email,
-    //   updatedAt: new Date().toISOString()
-    // }, { merge: true });
-
     return res.json({ success: true });
   } catch (err) {
     console.error("Firebase Sync Error:", err);
