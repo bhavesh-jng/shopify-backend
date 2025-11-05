@@ -113,6 +113,42 @@ const countryToPhoneCode = {
   'Other': 'US' // Default to US format for 'Other'
 };
 
+app.post("/register-firebase", async (req, res) => {
+  try {
+    const { firstName, lastName, email, password } = req.body;
+
+    // 1. Create Firebase Auth User (ignore if already exists)
+    let user;
+    try {
+      user = await admin.auth().createUser({
+        email,
+        password,
+        displayName: `${firstName} ${lastName}`.trim()
+      });
+    } catch(e) {
+      if (e.errorInfo?.code === "auth/email-already-exists") {
+        user = await admin.auth().getUserByEmail(email);
+      } else throw e;
+    }
+
+    // const customerName = `${firstName} ${lastName}`.trim();
+
+    // // 2. Save Profile to Firestore (idempotent)
+    // await firestore.collection("users").doc(user.uid).set({
+    //   uid: user.uid,
+    //   customerName,
+    //   email,
+    //   updatedAt: new Date().toISOString()
+    // }, { merge: true });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Firebase Sync Error:", err);
+    return res.status(200).json({ success: false, note: "Non-blocking sync" });
+  }
+});
+
+
 router.post("/", async (req, res) => {
   const { 
     customerId, 
