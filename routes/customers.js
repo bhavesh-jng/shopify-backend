@@ -142,8 +142,8 @@ router.post("/", async (req, res) => {
   const { 
     customerId, 
     customer_name,
-    customer_email, 
     business_name, 
+    email,
     customer_role, 
     customer_phone,
     country,
@@ -155,10 +155,10 @@ router.post("/", async (req, res) => {
   } = req.body;
 
   // Input validation
-  if (!customerId || !customer_name || !customer_role || !country || !business_name || !number_of_employees) {
+  if (!customerId || !customer_name || !customer_role || !country || !business_name || !number_of_employees || !email) {
     return res.status(400).json({
       error: 'Missing required fields',
-      details: 'customerId, customer_name, customer_role, country, business_name, and number_of_employees are required fields'
+      details: 'customerId, customer_name, customer_role, country, business_name, number_of_employees and email are required fields'
     });
   }
 
@@ -216,10 +216,10 @@ router.post("/", async (req, res) => {
     businessName: business_name,
     role: customer_role,
     contact: formattedPhone || "",
-    email: customer_email || "",
+    email: email || "",
     country: country,
     domain: domain_name || "",
-    numberOfEmployees: number_of_employees,
+    numberOfEmployees: number_of_employees,  
     isVerified: false, // Default to false for new customers
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
