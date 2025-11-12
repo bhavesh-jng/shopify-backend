@@ -1356,7 +1356,11 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
         isMultiBuyer,
         hasCollective,
         availableBuyers: buyersList,
-        currentBuyer: buyer || "All",
+        currentBuyer: buyer && buyer !== "All" 
+      ? buyer 
+      : hasCollective 
+        ? buyersList.find(b => b.toLowerCase().includes('collective')) || buyersList[0]
+        : buyersList[0] || "Unknown",
         metafieldBuyers: availableBuyers, // From customer metafield
       },
     });
