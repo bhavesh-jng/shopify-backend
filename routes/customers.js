@@ -1346,24 +1346,35 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
       customerRows.map(row => row["Buyer"]).filter(Boolean)
     )).sort();
 
+    let determinedCurrentBuyer;
+    if (buyer && buyer !== "All") {
+      // User explicitly selected a buyer
+      determinedCurrentBuyer = buyer;
+    } else {
+      // No buyer selected - pick a default
+      if (hasCollective) {
+        // If collective exists, use it
+        determinedCurrentBuyer = buyersList.find(b => b.toLowerCase().includes('collective')) || buyersList[0];
+      } else {
+        // No collective - just use first buyer
+        determinedCurrentBuyer = buyersList[0] || "Unknown";
+      }
+    }
+
     res.json({
-      success: true,
-      data: {
-        headers,
-        rows: filteredRows,
-        summary,
-        rowCount: filteredRows.length,
-        isMultiBuyer,
-        hasCollective,
-        availableBuyers: buyersList,
-        currentBuyer: buyer && buyer !== "All" 
-      ? buyer 
-      : hasCollective 
-        ? buyersList.find(b => b.toLowerCase().includes('collective')) || buyersList[0]
-        : buyersList[0] || "Unknown",
-        metafieldBuyers: availableBuyers, // From customer metafield
-      },
-    });
+  success: true,
+  data: {
+    headers,
+    rows: filteredRows,
+    summary,
+    rowCount: filteredRows.length,
+    isMultiBuyer,
+    hasCollective,
+    availableBuyers: buyersList,
+    currentBuyer: determinedCurrentBuyer,  // Use the determined buyer
+    metafieldBuyers: availableBuyers,
+  },
+});
   } catch (err) {
     console.error("Error fetching/parsing Excel file:", err.message);
     console.error("Full error:", err);
