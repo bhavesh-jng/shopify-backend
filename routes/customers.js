@@ -1856,6 +1856,7 @@ router.get("/customer/:customerId/buyer-performance", async (req, res) => {
  otifRaw: cleanNumber(customerData["OTIF"]),
  openPosYTD: cleanNumber(customerData["Open Pos YTD"]),
  shippedPosYTD: cleanNumber(customerData["Shipped Pos YTD"]),
+ openPosValue: cleanNumber(customerData["Open Pos"]),
  };
 
  res.json({
