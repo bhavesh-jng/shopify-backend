@@ -745,7 +745,7 @@ router.post("/verify",authenticateManualHmac, async (req, res) => {
       {
         ownerId: `gid://shopify/Customer/${customerId}`,
         namespace: "custom",
-        key: "is_verified",
+        key: "isverified",
         type: "boolean",
         value: isVerified.toString()
       }
