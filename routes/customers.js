@@ -138,7 +138,7 @@ router.post("/register-firebase", async (req, res) => {
 });
 
 
-router.post("/", async (req, res) => {
+router.post("/", authenticateManualHmac,async (req, res) => {
   const { 
     customerId, 
     customer_name,
