@@ -811,7 +811,7 @@ router.post("/verify",authenticateManualHmac, async (req, res) => {
       });
     }
 
-    // Firebase or other critical error
+    // Firebase or other critical errors
     return res.status(500).json({
       error: "Failed to update verification status",
       details: err.message || 'An unexpected error occurred'
