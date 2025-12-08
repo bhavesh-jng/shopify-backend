@@ -1312,7 +1312,7 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
         totals.totalConvertedSKUs += cleanNumber(row["Converted SKUs"]);
         totals.numberOfPos += cleanNumber(row["Number of Pos"]);
         totals.latePos += cleanNumber(row["Late Pos"]);
-        totals.onTimePos += cleanNumber(row["On Time Pos"]);
+        totals.onTimePos += cleanNumber(row["Ontime Pos"]);
       });
 
       // Calculate average OTIF
