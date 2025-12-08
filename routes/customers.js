@@ -1289,7 +1289,9 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
         totalSKUs: 0,
         totalConvertedSKUs: 0,
         numberOfPos: 0,
-      };
+        latePos:0,
+        onTimePos:0,
+        };
 
       rows.forEach(row => {
         totals.volumeLY25 += cleanNumber(row["Volume LY25"]);
@@ -1309,6 +1311,8 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
         totals.totalSKUs += cleanNumber(row["Total SKUs"]);
         totals.totalConvertedSKUs += cleanNumber(row["Converted SKUs"]);
         totals.numberOfPos += cleanNumber(row["Number of Pos"]);
+        totals.latePos += cleanNumber(row["Late Pos"]);
+        totals.onTimePos += cleanNumber(row["On Time Pos"]);
       });
 
       // Calculate average OTIF
@@ -1338,6 +1342,8 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
         numberOfPos: totals.numberOfPos,
         ytdTarget: totals.targetFY26,
         lytd: totals.volumeLY25,
+        latePos: totals.latePos,
+        onTimePos: totals.onTimePos,
       };
     };
 
@@ -1365,6 +1371,8 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
         numberOfPos: cleanNumber(collectiveRow["Number of Pos"]),
         ytdTarget: cleanNumber(collectiveRow["Target FY26"]),
         lytd: cleanNumber(collectiveRow["Volume LY25"]),
+        latePos: cleanNumber(collectiveRow["Late Pos"]),
+        onTimePos: cleanNumber(collectiveRow["Ontime Pos"]),
       };
     } else {
       // Use aggregation for non-Collective buyers
@@ -1428,6 +1436,8 @@ router.get("/customer/:customerId/merchants-performance", async (req, res) => {
             numberOfPos: cleanNumber(collectiveRow["Number of Pos"]),
             ytdTarget: cleanNumber(collectiveRow["Target FY26"]),
             lytd: cleanNumber(collectiveRow["Volume LY25"]),
+            latePos: cleanNumber(collectiveRow["Late Pos"]),
+            onTimePos: cleanNumber(collectiveRow["Ontime Pos"]),
           };
         } else {
           summary = aggregateSummary(filteredRows);
